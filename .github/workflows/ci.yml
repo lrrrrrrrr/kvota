@@ -16,7 +16,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Toolchain
         run: |
@@ -27,7 +27,9 @@ jobs:
         working-directory: KvotaKit
         env:
           KVOTA_SNAPSHOT_DIR: ${{ runner.temp }}/snapshots
-        run: swift test
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee "$RUNNER_TEMP/test.log"
 
       - name: Upload UI snapshots
         if: always()
@@ -48,7 +50,8 @@ jobs:
           xcodebuild -project Kvota.xcodeproj -scheme Kvota -configuration Release \
             -destination 'generic/platform=macOS' -derivedDataPath build \
             CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
-            build | tail -n 40
+            build > "$RUNNER_TEMP/build-direct.log" 2>&1 || { tail -n 80 "$RUNNER_TEMP/build-direct.log"; exit 1; }
+          tail -n 5 "$RUNNER_TEMP/build-direct.log"
 
       - name: Build App Store app
         run: |
@@ -56,7 +59,8 @@ jobs:
           xcodebuild -project Kvota.xcodeproj -scheme KvotaAppStore -configuration Release \
             -destination 'generic/platform=macOS' -derivedDataPath build \
             CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
-            build | tail -n 40
+            build > "$RUNNER_TEMP/build-appstore.log" 2>&1 || { tail -n 80 "$RUNNER_TEMP/build-appstore.log"; exit 1; }
+          tail -n 5 "$RUNNER_TEMP/build-appstore.log"
 
       - name: Check bundles
         run: |
@@ -71,6 +75,10 @@ jobs:
             echo "App Store build unexpectedly contains live-limit endpoints"; exit 1
           fi
 
+      - name: Annotate errors
+        if: failure()
+        run: scripts/ci-annotate.sh "$RUNNER_TEMP"/*.log
+
       - name: Upload app
         uses: actions/upload-artifact@v4
         with:
@@ -83,6 +91,6 @@ jobs:
     container: swift:6.1-noble
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Test KvotaCore
         run: swift test --package-path KvotaKit

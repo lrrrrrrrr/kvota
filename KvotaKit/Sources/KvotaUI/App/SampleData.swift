@@ -2,6 +2,7 @@ import Foundation
 import KvotaCore
 
 /// Realistic fixed data for previews, snapshot tests and App Store screenshots.
+@MainActor
 enum SampleData {
     static func model(now: Date = Date(timeIntervalSince1970: 1_792_929_600), style: WidgetStyle = .compact) -> AppModel {
         var settings = AppSettings()
@@ -10,15 +11,6 @@ enum SampleData {
         settings.liveProviders = [.gemini]
         settings.notificationsEnabled = true
         return AppModel(preview: settings, states: states(now: now), now: now, liveProvider: SampleLiveProvider())
-    }
-
-    /// Stands in for the live-limits client so previews show the direct build's options.
-    final class SampleLiveProvider: LiveLimitsProvider, @unchecked Sendable {
-        let supportedProviders: [ProviderID] = ProviderID.allCases
-
-        func fetchLimits(for provider: ProviderID, home: URL) async throws -> LimitsSnapshot {
-            throw KvotaError("Sample data")
-        }
     }
 
     static func states(now: Date) -> [ProviderState] {
@@ -101,5 +93,14 @@ enum SampleData {
             lastActivity: now.addingTimeInterval(-90),
             filesTracked: 42
         )
+    }
+}
+
+/// Stands in for the live-limits client so previews show the direct build's options.
+final class SampleLiveProvider: LiveLimitsProvider, @unchecked Sendable {
+    let supportedProviders: [ProviderID] = ProviderID.allCases
+
+    func fetchLimits(for provider: ProviderID, home: URL) async throws -> LimitsSnapshot {
+        throw KvotaError("Sample data")
     }
 }
