@@ -179,3 +179,31 @@ final class PricingAndFormatTests: XCTestCase {
         XCTAssertEqual(Format.modelName("gemini-2.5-pro"), "Gemini 2.5 Pro")
     }
 }
+
+final class CredentialExpiryTests: XCTestCase {
+    func testCodexTokenExpiryFromJWT() throws {
+        func jwt(exp: Int) -> String {
+            let payload = Data(#"{"exp":\#(exp),"sub":"user"}"#.utf8).base64EncodedString()
+                .replacingOccurrences(of: "=", with: "")
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+            return "eyJhbGciOiJSUzI1NiJ9.\(payload).signature"
+        }
+        let json = #"{"tokens":{"access_token":"\#(jwt(exp: 1_761_000_000))","account_id":"acc"}}"#
+        let credentials = try XCTUnwrap(CodexCredentials.parse(Data(json.utf8)))
+        XCTAssertEqual(credentials.expiresAt, Date(timeIntervalSince1970: 1_761_000_000))
+        XCTAssertTrue(credentials.isExpired(at: Date(timeIntervalSince1970: 1_761_000_001)))
+        XCTAssertFalse(credentials.isExpired(at: Date(timeIntervalSince1970: 1_760_999_000)))
+
+        let opaque = try XCTUnwrap(CodexCredentials.parse(Data(#"{"tokens":{"access_token":"not-a-jwt"}}"#.utf8)))
+        XCTAssertNil(opaque.expiresAt)
+        XCTAssertFalse(opaque.isExpired(at: Date()))
+    }
+
+    func testErrorHint() {
+        let error = KvotaError("Long explanation.", short: "Run codex to refresh login")
+        XCTAssertEqual(error.short, "Run codex to refresh login")
+        XCTAssertEqual(error.errorDescription, "Long explanation.")
+        XCTAssertNil(KvotaError("x").short)
+    }
+}

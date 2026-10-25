@@ -55,11 +55,40 @@ public enum CodexLimits {
 public struct CodexCredentials: Equatable, Sendable {
     public var accessToken: String
     public var accountID: String?
+    /// From the access token's `exp` claim, when it is a readable JWT.
+    public var expiresAt: Date?
+
+    public init(accessToken: String, accountID: String?, expiresAt: Date? = nil) {
+        self.accessToken = accessToken
+        self.accountID = accountID
+        self.expiresAt = expiresAt
+    }
 
     public static func parse(_ data: Data) -> CodexCredentials? {
         guard let root = JSON.object(data),
               let tokens = root["tokens"] as? [String: Any],
               let token = JSON.string(tokens["access_token"]) else { return nil }
-        return CodexCredentials(accessToken: token, accountID: JSON.string(tokens["account_id"]))
+        return CodexCredentials(
+            accessToken: token,
+            accountID: JSON.string(tokens["account_id"]),
+            expiresAt: JWT.expiry(token)
+        )
+    }
+
+    public func isExpired(at now: Date) -> Bool {
+        guard let expiresAt else { return false }
+        return expiresAt <= now
+    }
+}
+
+/// Reads claims from a JWT without verifying it (only to know when a token expires).
+enum JWT {
+    static func expiry(_ token: String) -> Date? {
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var base64 = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 { base64 += "=" }
+        guard let data = Data(base64Encoded: base64), let claims = JSON.object(data) else { return nil }
+        return JSON.date(claims["exp"])
     }
 }

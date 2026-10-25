@@ -20,6 +20,8 @@ public struct ProviderState: Equatable {
     public var localLimits: LimitsSnapshot?
     public var liveLimits: LimitsSnapshot?
     public var liveError: String?
+    /// A few words saying what to do about `liveError`.
+    public var liveErrorHint: String?
     public var access: DataAccess = .unknown
     public var bridgeInstalled = false
 
@@ -215,6 +217,7 @@ public final class AppModel {
                 update(provider) {
                     $0.liveLimits = nil
                     $0.liveError = nil
+                    $0.liveErrorHint = nil
                 }
                 lastLiveFetch[provider] = nil
             }
@@ -387,9 +390,13 @@ public final class AppModel {
                     self?.update(provider) {
                         $0.liveLimits = snapshot
                         $0.liveError = nil
+                        $0.liveErrorHint = nil
                     }
                 } catch {
-                    self?.update(provider) { $0.liveError = error.localizedDescription }
+                    self?.update(provider) {
+                        $0.liveError = error.localizedDescription
+                        $0.liveErrorHint = (error as? KvotaError)?.short
+                    }
                 }
                 self?.liveInFlight.remove(provider)
                 self?.evaluateAlerts()

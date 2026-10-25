@@ -178,7 +178,7 @@ private struct CompactItem: View {
 
     private func primaryText(_ used: Double?) -> String {
         guard let used else {
-            return state.liveError != nil ? "Can't load" : "No limits yet"
+            return state.liveError != nil ? "Not connected" : "No limits yet"
         }
         return showRemaining ? "\(Format.percent(max(0, 100 - used))) left" : "\(Format.percent(used)) used"
     }
@@ -190,7 +190,10 @@ private struct CompactItem: View {
             }
             return window.label
         }
-        return state.liveError != nil ? "click for details" : "click to set up"
+        if state.liveError != nil {
+            return state.liveErrorHint ?? "click for details"
+        }
+        return "click to set up"
     }
 
     private var helpText: String {
@@ -243,7 +246,9 @@ private struct DetailedItem: View {
                     LimitRow(window: window, tint: provider.tint, now: now, dense: true, showRemaining: showRemaining)
                 }
             } else {
-                Text(state.liveError != nil ? "Can't load limits. Click for details." : "No limit data yet. Click to set up.")
+                Text(state.liveError != nil
+                     ? "\(state.liveErrorHint ?? "Can't load limits"). Click for details."
+                     : "No limit data yet. Click to set up.")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }

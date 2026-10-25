@@ -106,6 +106,13 @@ public protocol LiveLimitsProvider: AnyObject, Sendable {
 
 public struct KvotaError: LocalizedError, Equatable, Sendable {
     public let message: String
-    public init(_ message: String) { self.message = message }
+    /// A few words for tight spaces, such as "Run codex to sign in again".
+    public let short: String?
+
+    public init(_ message: String, short: String? = nil) {
+        self.message = message
+        self.short = short
+    }
+
     public var errorDescription: String? { message }
 }
