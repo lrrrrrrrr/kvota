@@ -9,3 +9,5 @@ xcuserdata/
 Config/Local.xcconfig
 *.p12
 *.zip
+__pycache__/
+*.pyc
