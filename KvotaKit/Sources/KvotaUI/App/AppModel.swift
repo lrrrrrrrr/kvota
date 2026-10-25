@@ -93,6 +93,15 @@ public final class AppModel {
             loaded.settingsVersion = AppSettings.currentVersion
             loaded.save()
         }
+        // Drop live-limit choices this build can't serve (Claude's live path was removed),
+        // so nothing waits on a request that never happens.
+        if let liveProvider {
+            let supported = loaded.liveProviders.intersection(liveProvider.supportedProviders)
+            if supported != loaded.liveProviders {
+                loaded.liveProviders = supported
+                loaded.save()
+            }
+        }
         self.settings = loaded
         self.persistsSettings = true
         self.states = Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { ($0, ProviderState(provider: $0)) })

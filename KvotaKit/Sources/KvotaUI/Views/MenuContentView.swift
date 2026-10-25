@@ -175,7 +175,7 @@ struct ProviderCard: View {
     @ViewBuilder
     private var limitsHint: some View {
         let liveSupported = model.supportsLiveLimits(for: provider)
-        let liveOn = model.settings.liveProviders.contains(provider)
+        let liveOn = liveSupported && model.settings.liveProviders.contains(provider)
         let offerLive = liveSupported && !liveOn
         let offerBridge = provider == .claude && !state.bridgeInstalled
         VStack(alignment: .leading, spacing: 6) {
@@ -207,7 +207,7 @@ struct ProviderCard: View {
         switch provider {
         case .claude:
             if state.bridgeInstalled {
-                return "Status line connected. Limits appear after your next message in Claude Code."
+                return "Status line connected. Limits appear after your next message in the claude command-line tool (Pro or Max plans). The Claude desktop app doesn't run status lines."
             }
             return liveSupported
                 ? "Show your 5-hour and weekly limits live, or connect Claude Code's status line."
