@@ -205,7 +205,7 @@ private struct ProviderSection: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Status line bridge")
-                    Text("Claude Code shares your 5-hour and weekly usage with its status line. The bridge saves that for Kvota and keeps your current status line working.")
+                    Text("Claude Code shares your 5-hour and weekly usage with its status line. The bridge saves that for Kvota and keeps your current status line working. If you had none, Claude Code shows a short one with your model and limits.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

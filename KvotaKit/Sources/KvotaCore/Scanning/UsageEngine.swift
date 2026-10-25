@@ -302,7 +302,7 @@ public final class UsageEngine {
     static func isOldCodexDayFolder(_ url: URL, root: URL, cutoff: Date) -> Bool {
         let parts = url.pathComponents
         guard parts.count >= 4, parts[parts.count - 4] == root.lastPathComponent else { return false }
-        let tail = parts.suffix(3).map(String.init)
+        let tail = Array(parts.suffix(3))
         guard tail[0].count == 4, let year = Int(tail[0]), let month = Int(tail[1]), let day = Int(tail[2]),
               (1...12).contains(month), (1...31).contains(day)
         else { return false }

@@ -93,9 +93,10 @@ public final class AppModel {
         var all = Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { ($0, ProviderState(provider: $0)) })
         for state in states { all[state.provider] = state }
         self.states = all
+        self.firedAlerts = []
+        // Re-assign defaulted properties only after every stored property is initialized.
         self.now = now
         self.lastRefresh = now
-        self.firedAlerts = []
         self.isPreview = true
     }
 
