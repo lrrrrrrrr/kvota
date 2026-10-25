@@ -167,6 +167,13 @@ struct ProviderCard: View {
                     .foregroundStyle(.orange)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
+                if state.usage?.hasActivity != true {
+                    Button("Not using \(provider.displayName)? Hide it") {
+                        model.settings.enabledProviders.remove(provider)
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 10))
+                }
             }
             usageLine
         }
@@ -275,6 +282,7 @@ struct ProviderCard: View {
         switch source {
         case .sessionLog: "Read from \(provider.toolName)'s own session log on this Mac."
         case .statusLine: "Saved by Kvota's status line bridge after Claude Code's last reply."
+        case .estimate: "Worked out from Claude Code's logs on this Mac. Claude doesn't publish exact limits locally, so 100% means your heaviest 5-hour session so far."
         case .live: "Fetched from \(provider.displayName)'s usage endpoint with your existing \(provider.toolName) login."
         }
     }

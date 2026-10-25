@@ -80,6 +80,7 @@ public final class UsageEngine {
 
         var prices: [Int32: ModelPrice?] = [:]
         var perModel: [Int32: UsageTotals] = [:]
+        var perSlot: [Int32: UsageTotals] = [:]
 
         for (key, bucket) in ledger.aggregated() where bucket.requests > 0 || !bucket.counts.isZero {
             let price: ModelPrice?
@@ -92,6 +93,7 @@ public final class UsageEngine {
             let cost = price?.cost(of: bucket.counts)
             let requests = Int(bucket.requests)
 
+            perSlot[key.slot, default: UsageTotals()].add(bucket.counts, requests: requests, cost: cost)
             if key.slot >= monthSlot { summary.thisMonth.add(bucket.counts, requests: requests, cost: cost) }
             if key.slot >= todaySlot { summary.today.add(bucket.counts, requests: requests, cost: cost) }
             if key.slot >= fiveHourSlot { summary.last5Hours.add(bucket.counts, requests: requests, cost: cost) }
@@ -108,9 +110,35 @@ public final class UsageEngine {
             .map { ModelUsage(model: ledger.models[Int($0.key)], totals: $0.value) }
             .filter { !$0.totals.isEmpty }
             .sorted { $0.totals.tokens.total > $1.totals.tokens.total }
+        let blocks = Self.sessionBlocks(perSlot)
+        summary.heaviestBlockTokens = blocks.map(\.totals.tokens.total).max() ?? 0
+        if let last = blocks.last, last.end > now {
+            summary.currentBlock = last
+        }
         summary.lastActivity = ledger.files.values.compactMap(\.lastEvent).max()
         summary.filesTracked = ledger.files.count
         return summary
+    }
+
+    static let blockLength: TimeInterval = 5 * 3600
+
+    /// Groups activity into 5-hour sessions: a session starts at the hour of the first
+    /// request after the previous session ended and lasts five hours.
+    static func sessionBlocks(_ perSlot: [Int32: UsageTotals]) -> [UsageBlock] {
+        var blocks: [UsageBlock] = []
+        for slot in perSlot.keys.sorted() {
+            guard let totals = perSlot[slot], !totals.isEmpty else { continue }
+            let time = Date(timeIntervalSince1970: Double(slot) * slotSeconds)
+            if var last = blocks.last, time < last.end {
+                last.totals.merge(totals)
+                last.lastActivity = time
+                blocks[blocks.count - 1] = last
+            } else {
+                let start = Date(timeIntervalSince1970: (time.timeIntervalSince1970 / 3600).rounded(.down) * 3600)
+                blocks.append(UsageBlock(start: start, end: start.addingTimeInterval(blockLength), totals: totals, lastActivity: time))
+            }
+        }
+        return blocks
     }
 
     // MARK: - Internals

@@ -8,12 +8,15 @@ public enum LimitSource: String, Sendable, Codable, Equatable {
     case statusLine
     /// Fetched from the provider's usage endpoint with the CLI's existing login.
     case live
+    /// Worked out from local logs, not reported by the provider.
+    case estimate
 
     public var displayName: String {
         switch self {
         case .sessionLog: "session log"
         case .statusLine: "status line"
         case .live: "live"
+        case .estimate: "estimate from logs"
         }
     }
 }

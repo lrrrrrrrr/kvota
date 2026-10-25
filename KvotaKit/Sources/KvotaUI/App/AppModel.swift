@@ -26,14 +26,17 @@ public struct ProviderState: Equatable {
     public var bridgeInstalled = false
     /// The last time Claude Code ran the bridge, and what it shared.
     public var bridgeLastRun: StatusLineRun?
+    /// Claude's current 5-hour session reconstructed from the logs, shown while Claude Code
+    /// hasn't reported real limits.
+    public var estimatedLimits: LimitsSnapshot?
 
     public init(provider: ProviderID) {
         self.provider = provider
     }
 
-    /// The freshest limits reading from any source.
+    /// The freshest limits reading from any source; an estimate only when nothing better exists.
     public var limits: LimitsSnapshot? {
-        LimitsSnapshot.newest(localLimits, liveLimits)
+        LimitsSnapshot.newest(localLimits, liveLimits) ?? estimatedLimits
     }
 
     public func highestPercent(at now: Date) -> Double? {
@@ -361,9 +364,11 @@ public final class AppModel {
                 bridgeInstalled = result.1
                 bridgeLastRun = result.2
             }
+            let estimate = provider == .claude ? Self.estimatedSession(from: summary, now: now) : nil
             update(provider) {
                 $0.usage = summary
                 $0.localLimits = localLimits
+                $0.estimatedLimits = estimate
                 if provider == .claude {
                     $0.bridgeInstalled = bridgeInstalled
                     $0.bridgeLastRun = bridgeLastRun
@@ -389,6 +394,25 @@ public final class AppModel {
         watcher = paths.isEmpty ? nil : DirectoryWatcher(paths: paths, latency: 2) { [weak self] in
             Task { @MainActor in self?.scheduleScan() }
         }
+    }
+
+    /// Claude's session limit runs in 5-hour windows. Without Claude Code's own numbers,
+    /// show where the current window stands, scaled to the busiest window so far.
+    static func estimatedSession(from usage: ProviderUsageSummary, now: Date) -> LimitsSnapshot? {
+        guard let block = usage.currentBlock, block.end > now, usage.heaviestBlockTokens > 0 else { return nil }
+        let tokens = block.totals.tokens.total
+        let used = min(100, Double(tokens) / Double(usage.heaviestBlockTokens) * 100)
+        let window = LimitWindow(
+            id: "estimated-session",
+            label: "5-hour (estimate)",
+            usedPercent: used,
+            resetsAt: block.end,
+            duration: 5 * 3600
+        )
+        var detail = "\(Format.tokens(tokens)) tokens this session"
+        if block.totals.cost > 0 { detail += " (≈\(Format.cost(block.totals.cost)))" }
+        detail += ", compared with your heaviest session. Exact limits appear when Claude Code shares them."
+        return LimitsSnapshot(provider: .claude, windows: [window], capturedAt: now, source: .estimate, detail: detail)
     }
 
     // MARK: - Live limits
@@ -431,7 +455,7 @@ public final class AppModel {
         let thresholds = Array(Set([settings.warnThreshold, 95])).sorted()
         var changed = false
         for provider in visibleProviders {
-            guard let limits = state(for: provider).limits else { continue }
+            guard let limits = state(for: provider).limits, limits.source != .estimate else { continue }
             for window in limits.windows {
                 let used = window.usedPercent(at: now)
                 guard let threshold = thresholds.last(where: { used >= Double($0) }) else { continue }
