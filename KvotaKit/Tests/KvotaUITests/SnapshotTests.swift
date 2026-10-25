@@ -14,7 +14,10 @@ final class SnapshotTests: XCTestCase {
         }
         let directory = URL(fileURLWithPath: path, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        _ = NSApplication.shared
+        // An active app draws switches and tabs in their accent colors.
+        NSApplication.shared.setActivationPolicy(.accessory)
+        NSApp.activate(ignoringOtherApps: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
 
         for scheme in [ColorScheme.light, .dark] {
             let suffix = scheme == .dark ? "dark" : "light"

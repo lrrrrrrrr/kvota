@@ -59,7 +59,7 @@ struct SettingsView: View {
                 .tag(SettingsTab.about)
         }
         // Screenshots show whole sections instead of a scrolled view.
-        .frame(width: 560, height: snapshotMode ? 668 : 560)
+        .frame(width: 560, height: snapshotMode ? 582 : 560)
     }
 }
 
