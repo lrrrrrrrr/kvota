@@ -1,14 +1,17 @@
 # How Kvota reads your usage
 
 Kvota never asks for a password or an API key. It reads what the three CLIs already
-keep on your Mac, and (only in the direct-download build, only if you switch it on)
-asks each provider for your current limits using the login the CLI already has.
+keep on your Mac. The direct-download build can also ask OpenAI and Google for your
+current Codex and Gemini limits using the login those CLIs already have (on by default,
+switchable per provider). Claude limits come only from Claude Code's documented status
+line data: Anthropic doesn't allow third-party apps to use Claude sign-in tokens, so
+Kvota never reads or sends them.
 
 | | Claude Code | Codex CLI | Gemini CLI |
 |---|---|---|---|
 | **Token usage** | `~/.claude/projects/**/*.jsonl` — `message.usage` on assistant lines | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (`.jsonl.zst` after a week) — `token_count` events | `~/.gemini/tmp/<project>/chats/session-*.jsonl` (older: `.json`) — `tokens` on `gemini` messages |
 | **Limits, local** | Status line bridge (below) | Written into the same rollout files: `rate_limits.primary` (5-hour) and `secondary` (weekly) | Not stored locally |
-| **Limits, live** (opt-in) | `GET api.anthropic.com/api/oauth/usage` with Claude Code's login | `GET chatgpt.com/backend-api/wham/usage` with `~/.codex/auth.json` | `POST cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` with `~/.gemini/oauth_creds.json` |
+| **Limits, live** (direct build) | Not used (see above) | `GET chatgpt.com/backend-api/wham/usage` with the Codex CLI login | `POST cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` with the Gemini CLI login |
 
 ## Why this approach
 
@@ -59,11 +62,22 @@ API-equivalent value of what you used.
 
 | Provider | Credential read | Request |
 |---|---|---|
-| Claude | "Claude Code-credentials" Keychain item (macOS asks you once) or `~/.claude/.credentials.json` | `GET https://api.anthropic.com/api/oauth/usage` |
-| Codex | `~/.codex/auth.json` | `GET https://chatgpt.com/backend-api/wham/usage` |
-| Gemini | `~/.gemini/oauth_creds.json` | `POST https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist` and `:retrieveUserQuota` |
+| Codex | `~/.codex/auth.json`, or the "Codex Auth" Keychain item when Codex stores its login there | `GET https://chatgpt.com/backend-api/wham/usage` |
+| Gemini | `~/.gemini/oauth_creds.json`, or the "gemini-cli-oauth" Keychain item | `POST https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist` and `:retrieveUserQuota` |
+
+Keychain items are read with macOS's `security` tool, so macOS asks you once whether to
+allow it. Claude has no row here on purpose.
 
 Tokens stay in memory and are never written anywhere. If Gemini's one-hour token has
 expired, Kvota renews it in memory using the public OAuth client of the Gemini CLI
 installed on your Mac, exactly as the CLI itself would. Kvota never renews or rewrites
-Claude or Codex logins; if one has expired, run that CLI once.
+the Codex login; if it has expired, run codex once.
+
+## Troubleshooting
+
+`scripts/kvota-doctor.py` checks what Kvota can find for each tool and prints only
+yes/no, expiry dates and HTTP status codes, never a secret:
+
+```sh
+python3 scripts/kvota-doctor.py
+```

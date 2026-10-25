@@ -243,7 +243,7 @@ private struct ProviderSection: View {
 
     private var limitsSourceText: String {
         switch provider {
-        case .claude: "From the status line bridge" + (model.supportsLiveLimits(for: .claude) ? " or live" : "")
+        case .claude: "From Claude Code's status line"
         case .codex: "From Codex's session logs" + (model.supportsLiveLimits(for: .codex) ? " or live" : "")
         case .gemini: model.supportsLiveLimits(for: .gemini) ? "Live only (Gemini CLI keeps no local copy)" : "Not available in this build"
         }
@@ -252,11 +252,11 @@ private struct ProviderSection: View {
     private var liveExplanation: String {
         switch provider {
         case .claude:
-            "Asks Anthropic for your current usage with Claude Code's login. macOS asks once to allow Kvota to read the \"Claude Code-credentials\" Keychain item."
+            "Not available: Kvota doesn't use Claude sign-in tokens. Claude limits come from Claude Code's status line."
         case .codex:
-            "Asks ChatGPT for your Codex limits with the login in ~/.codex/auth.json. Useful when you also use Codex in the cloud or the IDE."
+            "Asks ChatGPT for your Codex limits with the Codex CLI login (~/.codex/auth.json or the Keychain). macOS may ask once to allow access."
         case .gemini:
-            "Asks Google for your daily request quotas with the login in ~/.gemini/oauth_creds.json."
+            "Asks Google for your daily request quotas with the Gemini CLI login (~/.gemini/oauth_creds.json or the Keychain)."
         }
     }
 

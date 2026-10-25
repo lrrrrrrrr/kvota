@@ -10,6 +10,7 @@ and HTTP status codes. Uses only the Python standard library and macOS's own too
 """
 import base64
 import datetime as dt
+import hashlib
 import json
 import os
 import pathlib
@@ -103,10 +104,13 @@ def keychain_services(prefix):
     return sorted(names)
 
 
-def keychain_secret(service):
+def keychain_secret(service, account=None):
+    args = ["/usr/bin/security", "find-generic-password", "-s", service]
+    if account:
+        args += ["-a", account]
     try:
         out = subprocess.run(
-            ["/usr/bin/security", "find-generic-password", "-s", service, "-w"],
+            args + ["-w"],
             capture_output=True, text=True, timeout=60,
         )
     except Exception as error:
@@ -167,49 +171,16 @@ def check_claude():
     else:
         info("status line bridge not connected")
 
-    creds = None
-    file_creds = read_json(folder / ".credentials.json")
-    if file_creds:
-        ok("~/.claude/.credentials.json exists")
-        creds = file_creds
+    # Kvota never uses Claude sign-in tokens (Anthropic doesn't allow third-party apps to),
+    # so only check that Claude Code is signed in, without reading the token.
+    if (folder / ".credentials.json").exists():
+        ok("Claude Code login file exists (~/.claude/.credentials.json)")
     services = keychain_services("Claude Code")
     if services:
-        ok(f"Keychain items: {', '.join(services)}")
-    else:
-        bad('no "Claude Code-credentials" item in the Keychain (the claude CLI saves it after /login with a Claude account)')
-    if creds is None:
-        for service in [s for s in services if s.startswith("Claude Code-credentials")] or ["Claude Code-credentials"]:
-            secret, error = keychain_secret(service)
-            if secret:
-                try:
-                    creds = json.loads(secret)
-                    ok(f'read "{service}" from the Keychain')
-                    break
-                except json.JSONDecodeError:
-                    warn(f'"{service}" isn\'t the expected JSON')
-            elif services:
-                warn(f'couldn\'t read "{service}": {error}')
-    if not creds:
-        return
-    oauth = creds.get("claudeAiOauth") if isinstance(creds, dict) else None
-    if not oauth:
-        bad("the login has no Claude subscription (claudeAiOauth) part; maybe only MCP logins are stored")
-        return
-    info(f"plan: {oauth.get('subscriptionType') or 'unknown'}; token expires {when(oauth.get('expiresAt'))}")
-    scopes = oauth.get("scopes") or []
-    if scopes and "user:profile" not in scopes:
-        warn(f"token scopes {scopes} lack user:profile, so the usage endpoint will refuse it")
-    status, body = curl(
-        "https://api.anthropic.com/api/oauth/usage",
-        {"Authorization": f"Bearer {oauth.get('accessToken', '')}", "anthropic-beta": "oauth-2025-04-20", "Accept": "application/json"},
-    )
-    if status is None and body is None:
-        return
-    if status == 200:
-        data = json.loads(body)
-        ok("usage endpoint: " + limits_line([("5-hour", data.get("five_hour")), ("weekly", data.get("seven_day"))]))
-    else:
-        bad(f"usage endpoint answered {status or 'nothing'}: {(body or '')[:160]}")
+        ok(f"Claude Code is signed in (Keychain: {', '.join(services)})")
+    elif not (folder / ".credentials.json").exists():
+        warn("no Claude Code sign-in found for the claude command-line tool (run claude, then /login)")
+    info("Kvota shows Claude limits from Claude Code's status line (Pro/Max, claude command-line tool)")
 
 
 # ---------------------------------------------------------------- Codex
@@ -227,9 +198,24 @@ def check_codex():
         newest = max(rollouts, key=lambda p: p.stat().st_mtime)
         info(f"newest session log: {when(newest.stat().st_mtime)}")
     auth = read_json(folder / "auth.json")
-    if not auth:
-        bad("~/.codex/auth.json not found: run codex and sign in")
-        return
+    if auth:
+        ok("login file ~/.codex/auth.json found")
+    else:
+        account = "cli|" + hashlib.sha256(str(folder.resolve()).encode()).hexdigest()[:16]
+        secret, error = keychain_secret("Codex Auth", account)
+        if secret:
+            ok('login found in the Keychain ("Codex Auth")')
+            try:
+                auth = json.loads(secret)
+            except json.JSONDecodeError:
+                bad("Keychain login isn't the expected JSON")
+                return
+        else:
+            bad("no Codex CLI login (no ~/.codex/auth.json and nothing in the Keychain): run codex and sign in with ChatGPT")
+            others = keychain_services("codex")
+            if others:
+                info(f"Keychain items mentioning codex: {', '.join(others)}")
+            return
     if auth.get("OPENAI_API_KEY"):
         warn("auth.json holds an API key (API keys have no plan limits)")
     tokens = auth.get("tokens") or {}
@@ -278,13 +264,28 @@ def check_gemini():
     gemini = shutil.which("gemini")
     info(f"gemini command: {gemini or 'not on PATH in this shell'}")
     creds = read_json(folder / "oauth_creds.json")
-    if not creds:
-        bad("~/.gemini/oauth_creds.json not found (Google sign-in may be stored in the Keychain or not done)")
-        services = keychain_services("gemini")
-        if services:
-            info(f"Keychain items mentioning gemini: {', '.join(services)}")
-        return
-    ok("Google sign-in found")
+    if creds:
+        ok("Google sign-in found in ~/.gemini/oauth_creds.json")
+    else:
+        secret, _ = keychain_secret("gemini-cli-oauth", "main-account")
+        token = None
+        if secret:
+            try:
+                token = json.loads(secret).get("token")
+            except json.JSONDecodeError:
+                token = None
+        if not token:
+            bad("no Gemini CLI Google sign-in (no ~/.gemini/oauth_creds.json and nothing in the Keychain): run gemini, Login with Google")
+            services = keychain_services("gemini")
+            if services:
+                info(f"Keychain items mentioning gemini: {', '.join(services)}")
+            return
+        ok('Google sign-in found in the Keychain ("gemini-cli-oauth")')
+        creds = {
+            "access_token": token.get("accessToken"),
+            "refresh_token": token.get("refreshToken"),
+            "expiry_date": token.get("expiresAt"),
+        }
     info(f"access token expires {when(creds.get('expiry_date'))}; refresh token: {'yes' if creds.get('refresh_token') else 'no'}")
     expiry = creds.get("expiry_date") or 0
     if expiry / 1000 < NOW.timestamp():

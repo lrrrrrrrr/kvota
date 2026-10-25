@@ -90,21 +90,6 @@ final class LimitParsingTests: XCTestCase {
         XCTAssertNil(ClaudeLimits.parseStatusLine(Data("{}".utf8), capturedAt: now))
     }
 
-    func testClaudeOAuthUsage() throws {
-        let json = #"""
-        {"five_hour":{"utilization":37.0,"resets_at":"2025-10-21T01:00:00.000Z"},
-         "seven_day":{"utilization":12.0,"resets_at":"2025-10-24T20:00:00Z"},
-         "seven_day_opus":{"utilization":55.0,"resets_at":"2025-10-24T20:00:00Z"},
-         "seven_day_sonnet":null,
-         "extra_usage":{"is_enabled":false}}
-        """#
-        let snapshot = try XCTUnwrap(ClaudeLimits.parseOAuthUsage(Data(json.utf8), capturedAt: now, plan: "Max"))
-        XCTAssertEqual(snapshot.windows.map(\.label), ["5-hour", "Weekly", "Opus weekly"])
-        XCTAssertEqual(snapshot.windows[0].usedPercent, 37)
-        XCTAssertEqual(snapshot.plan, "Max")
-        XCTAssertEqual(snapshot.source, .live)
-    }
-
     func testCodexUsageEndpoint() throws {
         let json = #"""
         {"plan_type":"plus","rate_limit":{"allowed":true,
@@ -133,17 +118,18 @@ final class LimitParsingTests: XCTestCase {
     }
 
     func testCredentialFiles() {
-        let claude = ClaudeCredentials.parse(Data(#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x","refreshToken":"r","expiresAt":1761003600000,"subscriptionType":"max"}}"#.utf8))
-        XCTAssertEqual(claude?.expiresAt, Date(timeIntervalSince1970: 1_761_003_600))
-        XCTAssertEqual(claude?.isExpired(at: now), false)
-        XCTAssertEqual(ClaudeLimits.planName(claude?.subscriptionType), "Max")
-
         let codex = CodexCredentials.parse(Data(#"{"OPENAI_API_KEY":null,"tokens":{"id_token":"a","access_token":"b","refresh_token":"c","account_id":"acc"}}"#.utf8))
         XCTAssertEqual(codex, CodexCredentials(accessToken: "b", accountID: "acc"))
 
         let gemini = GeminiCredentials.parse(Data(#"{"access_token":"ya29","refresh_token":"1//r","expiry_date":1761003600000,"token_type":"Bearer"}"#.utf8))
         XCTAssertEqual(gemini?.hasValidAccessToken(at: now), true)
         XCTAssertEqual(gemini?.hasValidAccessToken(at: now.addingTimeInterval(7200)), false)
+
+        // Gemini CLI's Keychain format.
+        let keychain = GeminiCredentials.parse(Data(#"{"serverName":"main-account","token":{"accessToken":"ya29.k","refreshToken":"1//k","expiresAt":1761003600000,"tokenType":"Bearer"},"updatedAt":1}"#.utf8))
+        XCTAssertEqual(keychain?.accessToken, "ya29.k")
+        XCTAssertEqual(keychain?.refreshToken, "1//k")
+        XCTAssertEqual(keychain?.expiresAt, Date(timeIntervalSince1970: 1_761_003_600))
     }
 }
 

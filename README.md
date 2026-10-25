@@ -50,9 +50,11 @@ No passwords, no API keys. Kvota reads what the CLIs already store on your Mac:
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | Claude Code passes them to status line commands; Kvota's bridge saves them (your status line keeps working) |
 | **Gemini CLI** | `~/.gemini/tmp/*/chats/*.jsonl` | Live only: Gemini CLI keeps no local copy |
 
-The direct-download build can also fetch **live limits** from each provider with the
-login the CLI already has — off by default, per provider. Details, endpoints and the
-reasoning behind this design: [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md).
+The direct-download build also fetches **live Codex and Gemini limits** with the login
+those CLIs already have (switchable per provider). Claude limits come only from Claude
+Code's status line: Kvota never uses Claude sign-in tokens, which Anthropic doesn't allow
+third-party apps to do. Details, endpoints and troubleshooting:
+[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md).
 
 ## Light on resources
 
@@ -91,7 +93,7 @@ On first launch Kvota opens its settings. For Claude limits, click **Connect** n
 |---|---|---|
 | Sandbox | No (hardened runtime) | Yes |
 | Folder access | Automatic | You pick `~/.claude`, `~/.codex`, `~/.gemini` once |
-| Network | Only for live limits you enable | None |
+| Network | Only for live Codex and Gemini limits | None |
 | Live limits | Optional | Not included |
 
 ## Project layout

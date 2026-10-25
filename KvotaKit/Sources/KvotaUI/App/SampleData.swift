@@ -98,7 +98,7 @@ enum SampleData {
 
 /// Stands in for the live-limits client so previews show the direct build's options.
 final class SampleLiveProvider: LiveLimitsProvider, @unchecked Sendable {
-    let supportedProviders: [ProviderID] = ProviderID.allCases
+    let supportedProviders: [ProviderID] = [.codex, .gemini]
 
     func fetchLimits(for provider: ProviderID, home: URL) async throws -> LimitsSnapshot {
         throw KvotaError("Sample data")

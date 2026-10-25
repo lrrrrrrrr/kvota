@@ -82,6 +82,16 @@ public struct GeminiCredentials: Equatable, Sendable {
 
     public static func parse(_ data: Data) -> GeminiCredentials? {
         guard let root = JSON.object(data) else { return nil }
+        // Newer Gemini CLIs keep the login in the Keychain ("gemini-cli-oauth") as
+        // {"serverName": ..., "token": {"accessToken", "refreshToken", "expiresAt"}}.
+        if let token = root["token"] as? [String: Any] {
+            let creds = GeminiCredentials(
+                accessToken: JSON.string(token["accessToken"]),
+                refreshToken: JSON.string(token["refreshToken"]),
+                expiresAt: JSON.date(token["expiresAt"])
+            )
+            return creds.accessToken == nil && creds.refreshToken == nil ? nil : creds
+        }
         let creds = GeminiCredentials(
             accessToken: JSON.string(root["access_token"]),
             refreshToken: JSON.string(root["refresh_token"]),
