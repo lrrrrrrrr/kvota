@@ -1,6 +1,7 @@
 name: Release
 
-# Push a tag like v0.1.0 to build Kvota.app and attach it to a GitHub release.
+# Push a tag like v0.1.0 (or publish a release with a new tag on GitHub) to build
+# Kvota.app and attach it to the release.
 # With the optional secrets below the app is signed with Developer ID and notarized;
 # without them it is ad-hoc signed (right-click → Open on first launch).
 #
@@ -96,9 +97,18 @@ jobs:
           shasum -a 256 "$zip" | tee "$zip.sha256"
           notes="Download **$zip**, unzip and move Kvota to Applications."
           if [ "$HAS_SIGNING" != "true" ]; then
-            notes="$notes This build is not notarized yet: the first time, open Kvota, then go to System Settings → Privacy \& Security and click Open Anyway."
+            notes="$notes This build is not notarized yet: the first time, open Kvota, then go to System Settings → Privacy & Security and click Open Anyway."
           fi
-          gh release create "${{ steps.version.outputs.tag }}" "$zip" "$zip.sha256" --title "Kvota ${{ steps.version.outputs.version }}" --notes "$notes" --generate-notes
+          tag="${{ steps.version.outputs.tag }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # The release was drafted on GitHub before the tag existed: add the build to it.
+            gh release upload "$tag" "$zip" "$zip.sha256" --clobber
+            body="$(gh release view "$tag" --json body -q .body)"
+            printf '%s\n\n%s\n' "$notes" "$body" > notes.md
+            gh release edit "$tag" --notes-file notes.md
+          else
+            gh release create "$tag" "$zip" "$zip.sha256" --title "Kvota ${{ steps.version.outputs.version }}" --notes "$notes" --generate-notes
+          fi
 
       - name: Upload build
         uses: actions/upload-artifact@v4
