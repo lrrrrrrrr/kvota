@@ -55,6 +55,8 @@ public final class AppModel {
     public private(set) var lastRefresh: Date?
     public private(set) var isRefreshing = false
     public private(set) var bridgeMessage: String?
+    /// The floating widget shows every detail while expanded (toggled by clicking it).
+    public var widgetExpanded = false
 
     public let liveProvider: LiveLimitsProvider?
 
@@ -79,7 +81,17 @@ public final class AppModel {
 
     public init(liveProvider: LiveLimitsProvider?) {
         self.liveProvider = liveProvider
-        self.settings = AppSettings.load()
+        var loaded = AppSettings.load()
+        if loaded.settingsVersion < AppSettings.currentVersion {
+            // Version 2: live limits are on by default wherever the build supports them,
+            // so subscription limits show up without any setup.
+            if let liveProvider {
+                loaded.liveProviders.formUnion(liveProvider.supportedProviders)
+            }
+            loaded.settingsVersion = AppSettings.currentVersion
+            loaded.save()
+        }
+        self.settings = loaded
         self.persistsSettings = true
         self.states = Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { ($0, ProviderState(provider: $0)) })
         self.firedAlerts = UserDefaults.standard.stringArray(forKey: "firedAlerts") ?? []
@@ -253,8 +265,12 @@ public final class AppModel {
         }
         do {
             try StatusLineBridge(claudeHome: home).install()
-            bridgeMessage = "Connected. Limits appear after Claude Code's next reply."
+            bridgeMessage = "Connected. Limits appear after your next message in Claude Code."
             update(.claude) { $0.bridgeInstalled = true }
+            // Show something right away instead of waiting for Claude Code.
+            if supportsLiveLimits(for: .claude), !settings.liveProviders.contains(.claude) {
+                settings.liveProviders.insert(.claude)
+            }
         } catch {
             bridgeMessage = error.localizedDescription
         }

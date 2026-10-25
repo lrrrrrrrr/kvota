@@ -1,37 +1,45 @@
 import KvotaCore
 import SwiftUI
 
-/// The always-visible floating widget.
+/// The always-visible floating widget. Click it to expand into the full view with
+/// every detail; click the header (or the chevron) to collapse it again.
 struct WidgetView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         Group {
-            switch model.settings.widgetStyle {
-            case .compact: compact
-            case .detailed: detailed
+            if model.widgetExpanded {
+                expanded
+            } else {
+                switch model.settings.widgetStyle {
+                case .compact: compact
+                case .detailed: detailed
+                }
             }
         }
-        .background(WidgetBackground(cornerRadius: model.settings.widgetStyle == .compact ? 11 : 13))
+        .background(WidgetBackground(cornerRadius: model.widgetExpanded ? 14 : (model.settings.widgetStyle == .compact ? 11 : 13)))
         .fixedSize()
         .contextMenu { menu }
     }
 
     private var providers: [ProviderID] { model.visibleProviders }
 
-    // MARK: Compact: one ring and number per provider
+    // MARK: Compact: one ring and what's left per provider
 
     private var compact: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             if providers.isEmpty {
                 Text("Kvota").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
             }
             ForEach(providers) { provider in
-                CompactItem(state: model.state(for: provider), now: model.now)
+                CompactItem(state: model.state(for: provider), now: model.now, showRemaining: model.settings.showRemaining)
             }
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture { expand() }
+        .help("Click for details")
     }
 
     // MARK: Detailed: bars with reset times
@@ -42,16 +50,76 @@ struct WidgetView: View {
                 Text("No providers enabled").font(.system(size: 11)).foregroundStyle(.secondary)
             }
             ForEach(providers) { provider in
-                DetailedItem(state: model.state(for: provider), now: model.now, showCost: model.settings.showCost)
+                DetailedItem(
+                    state: model.state(for: provider),
+                    now: model.now,
+                    showCost: model.settings.showCost,
+                    showRemaining: model.settings.showRemaining
+                )
             }
         }
         .padding(11)
-        .frame(width: 232, alignment: .leading)
+        .frame(width: 250, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture { expand() }
+        .help("Click for details")
+    }
+
+    // MARK: Expanded: everything the menu bar window shows
+
+    private var expanded: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("Kvota")
+                    .font(.system(size: 12, weight: .semibold))
+                if let refreshed = model.lastRefresh {
+                    Text("updated \(Format.ago(refreshed, now: model.now))")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                IconButton(symbol: "arrow.clockwise", help: "Refresh now") { model.refreshNow() }
+                IconButton(symbol: "gearshape", help: "Settings") { model.openSettings(.providers) }
+                IconButton(symbol: "chevron.up", help: "Collapse") { collapse() }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+            .onTapGesture { collapse() }
+
+            if providers.isEmpty {
+                Text("All providers are hidden. Turn one on in Settings.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(16)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(providers) { provider in
+                        ProviderCard(state: model.state(for: provider))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+        }
+        .frame(width: 330)
+    }
+
+    private func expand() {
+        model.widgetExpanded = true
+        model.menuOpened()
+    }
+
+    private func collapse() {
+        model.widgetExpanded = false
     }
 
     @ViewBuilder
     private var menu: some View {
-        Button(model.settings.widgetStyle == .compact ? "Show Details" : "Compact View") {
+        Button(model.widgetExpanded ? "Collapse" : "Show All Details") {
+            model.widgetExpanded.toggle()
+        }
+        Button(model.settings.widgetStyle == .compact ? "Use Detailed Style" : "Use Compact Style") {
             model.settings.widgetStyle = model.settings.widgetStyle == .compact ? .detailed : .compact
         }
         Button("Make Click-Through") { model.settings.widgetClickThrough = true }
@@ -69,52 +137,80 @@ struct WidgetView: View {
 private struct CompactItem: View {
     let state: ProviderState
     let now: Date
+    let showRemaining: Bool
 
     var body: some View {
         let provider = state.provider
-        let used = state.highestPercent(at: now)
-        HStack(spacing: 6) {
+        let window = state.limits?.mostConstrained(at: now)
+        let used = window?.usedPercent(at: now)
+        let color = used.map { Theme.fill(for: $0, tint: provider.tint) } ?? provider.tint
+        HStack(spacing: 7) {
             RingGauge(
-                fraction: used.map { $0 / 100 },
-                color: used.map { Theme.fill(for: $0, tint: provider.tint) } ?? provider.tint,
-                lineWidth: 2.6
+                fraction: used.map { (showRemaining ? max(0, 100 - $0) : $0) / 100 },
+                color: color,
+                lineWidth: 3
             )
-            .frame(width: 17, height: 17)
-            VStack(alignment: .leading, spacing: -1) {
-                Text(provider.displayName)
+            .frame(width: 22, height: 22)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.secondary)
-                Text(valueText(used))
+                Text(primaryText(used))
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .monospacedDigit()
+                    .foregroundStyle(used == nil ? Color.secondary : Color.primary)
+                Text(secondaryText(window))
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
             }
+            .lineLimit(1)
+            .fixedSize()
         }
         .help(helpText)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(provider.displayName) \(valueText(used))")
+        .accessibilityLabel("\(title): \(primaryText(used)), \(secondaryText(window))")
     }
 
-    private func valueText(_ used: Double?) -> String {
-        if let used { return Format.percent(used) }
-        if let tokens = state.usage?.today.tokens.total, tokens > 0 { return Format.tokens(tokens) }
-        return "–"
+    private var title: String {
+        if let plan = state.limits?.plan { return "\(state.provider.displayName) · \(plan)" }
+        return state.provider.displayName
+    }
+
+    private func primaryText(_ used: Double?) -> String {
+        guard let used else {
+            return state.liveError != nil ? "Can't load" : "No limits yet"
+        }
+        return showRemaining ? "\(Format.percent(max(0, 100 - used))) left" : "\(Format.percent(used)) used"
+    }
+
+    private func secondaryText(_ window: LimitWindow?) -> String {
+        if let window {
+            if let resets = window.resetsAt, !window.isExpired(at: now) {
+                return "\(window.label) · resets \(Format.countdown(to: resets, from: now))"
+            }
+            return window.label
+        }
+        return state.liveError != nil ? "click for details" : "click to set up"
     }
 
     private var helpText: String {
         var lines: [String] = []
         if let limits = state.limits {
             for window in limits.windows {
-                var line = "\(window.label): \(Format.percent(window.usedPercent(at: now)))"
+                var line = "\(window.label): \(Format.percent(window.remainingPercent(at: now))) left"
                 if let resets = window.resetsAt, !window.isExpired(at: now) {
                     line += ", resets in \(Format.countdown(to: resets, from: now))"
                 }
                 lines.append(line)
             }
+            if let detail = limits.detail { lines.append(detail) }
         }
+        if let error = state.liveError { lines.append(error) }
         if let usage = state.usage, usage.hasActivity {
             lines.append("Today: \(Format.tokens(usage.today.tokens.total)) tokens")
         }
-        return lines.isEmpty ? "\(state.provider.displayName): no data yet" : lines.joined(separator: "\n")
+        lines.append("Click for details")
+        return lines.joined(separator: "\n")
     }
 }
 
@@ -122,6 +218,7 @@ private struct DetailedItem: View {
     let state: ProviderState
     let now: Date
     let showCost: Bool
+    let showRemaining: Bool
 
     var body: some View {
         let provider = state.provider
@@ -142,11 +239,11 @@ private struct DetailedItem: View {
                 }
             }
             if let limits = state.limits, !limits.windows.isEmpty {
-                ForEach(limits.windows.prefix(2)) { window in
-                    LimitRow(window: window, tint: provider.tint, now: now, dense: true)
+                ForEach(limits.windows.prefix(3)) { window in
+                    LimitRow(window: window, tint: provider.tint, now: now, dense: true, showRemaining: showRemaining)
                 }
             } else {
-                Text(state.usage?.hasActivity == true ? "No limit data yet" : "No activity yet")
+                Text(state.liveError != nil ? "Can't load limits. Click for details." : "No limit data yet. Click to set up.")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
@@ -154,7 +251,7 @@ private struct DetailedItem: View {
     }
 
     private func todayText(_ totals: UsageTotals) -> String {
-        let tokens = "\(Format.tokens(totals.tokens.total)) today"
+        let tokens = "\(Format.tokens(totals.tokens.total)) tokens today"
         guard showCost, totals.cost > 0 else { return tokens }
         return "\(tokens) · ≈\(Format.cost(totals.cost))"
     }

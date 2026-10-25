@@ -94,6 +94,7 @@ private struct GeneralSettings: View {
                 Picker("Show", selection: $model.settings.menuBarStyle) {
                     ForEach(MenuBarStyle.allCases) { Text($0.title).tag($0) }
                 }
+                Toggle("Show what's left of each limit (instead of what's used)", isOn: $model.settings.showRemaining)
                 Toggle("Show estimated API cost next to token counts", isOn: $model.settings.showCost)
             }
 

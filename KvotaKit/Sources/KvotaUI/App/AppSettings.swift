@@ -13,7 +13,7 @@ public enum MenuBarStyle: String, Codable, CaseIterable, Identifiable, Sendable 
 
     public var title: String {
         switch self {
-        case .highest: "Icon and highest usage"
+        case .highest: "Icon and the limit closest to running out"
         case .perProvider: "Usage per provider"
         case .iconOnly: "Icon only"
         }
@@ -40,6 +40,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var enabledProviders: Set<ProviderID> = Set(ProviderID.allCases)
     public var menuBarStyle: MenuBarStyle = .highest
     public var showCost = true
+    /// Show what's left of each limit ("38% left") rather than what's used.
+    public var showRemaining = true
 
     public var widgetVisible = true
     public var widgetStyle: WidgetStyle = .compact
@@ -57,15 +59,18 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var warnThreshold = 80
 
     public var hasLaunchedBefore = false
+    /// Bumped when defaults change in a way existing installs should pick up.
+    public var settingsVersion = 0
+    public static let currentVersion = 2
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case enabledProviders, menuBarStyle, showCost
+        case enabledProviders, menuBarStyle, showCost, showRemaining
         case widgetVisible, widgetStyle, widgetOpacity, widgetFadeWhenIdle, widgetClickThrough, widgetOnTop, widgetAllSpaces
         case liveProviders, liveRefreshMinutes
         case notificationsEnabled, warnThreshold
-        case hasLaunchedBefore
+        case hasLaunchedBefore, settingsVersion
     }
 
     private static let defaultsKey = "settings.v1"
@@ -93,6 +98,7 @@ extension AppSettings {
         enabledProviders = value(.enabledProviders, enabledProviders)
         menuBarStyle = value(.menuBarStyle, menuBarStyle)
         showCost = value(.showCost, showCost)
+        showRemaining = value(.showRemaining, showRemaining)
         widgetVisible = value(.widgetVisible, widgetVisible)
         widgetStyle = value(.widgetStyle, widgetStyle)
         widgetOpacity = min(1, max(0.3, value(.widgetOpacity, widgetOpacity)))
@@ -105,5 +111,6 @@ extension AppSettings {
         notificationsEnabled = value(.notificationsEnabled, notificationsEnabled)
         warnThreshold = min(99, max(10, value(.warnThreshold, warnThreshold)))
         hasLaunchedBefore = value(.hasLaunchedBefore, hasLaunchedBefore)
+        settingsVersion = value(.settingsVersion, settingsVersion)
     }
 }

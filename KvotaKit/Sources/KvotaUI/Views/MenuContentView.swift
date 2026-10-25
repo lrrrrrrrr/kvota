@@ -98,6 +98,10 @@ struct ProviderCard: View {
     @Environment(AppModel.self) private var model
     let state: ProviderState
 
+    init(state: ProviderState) {
+        self.state = state
+    }
+
     private var provider: ProviderID { state.provider }
 
     var body: some View {
@@ -146,7 +150,7 @@ struct ProviderCard: View {
             if let limits = state.limits, !limits.windows.isEmpty {
                 VStack(alignment: .leading, spacing: 7) {
                     ForEach(limits.windows.prefix(4)) { window in
-                        LimitRow(window: window, tint: provider.tint, now: model.now)
+                        LimitRow(window: window, tint: provider.tint, now: model.now, showRemaining: model.settings.showRemaining)
                     }
                 }
                 if let detail = limits.detail {
@@ -170,33 +174,52 @@ struct ProviderCard: View {
 
     @ViewBuilder
     private var limitsHint: some View {
-        let liveAvailable = model.supportsLiveLimits(for: provider)
-        switch provider {
-        case .claude:
-            HStack(spacing: 6) {
-                Text(state.bridgeInstalled
-                     ? "Limits appear after Claude Code's next reply."
-                     : "Connect Claude Code's status line to see your 5-hour and weekly limits.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !state.bridgeInstalled {
-                    Spacer(minLength: 0)
-                    Button("Connect") { model.installBridge() }
-                        .controlSize(.small)
-                }
-            }
-        case .codex:
-            Text("Limits appear after your next Codex reply.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-        case .gemini:
-            Text(liveAvailable
-                 ? "Turn on live limits in Settings to see Gemini's daily quotas."
-                 : "Gemini CLI doesn't save its quota locally; showing token usage.")
+        let liveSupported = model.supportsLiveLimits(for: provider)
+        let liveOn = model.settings.liveProviders.contains(provider)
+        let offerLive = liveSupported && !liveOn
+        let offerBridge = provider == .claude && !state.bridgeInstalled
+        VStack(alignment: .leading, spacing: 6) {
+            Text(hintText(liveSupported: liveSupported, liveOn: liveOn))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if offerLive || offerBridge {
+                HStack(spacing: 8) {
+                    if offerLive {
+                        Button("Show live limits") {
+                            model.settings.liveProviders.insert(provider)
+                        }
+                        .controlSize(.small)
+                    }
+                    if offerBridge {
+                        Button("Connect status line") { model.installBridge() }
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }
+    }
+
+    private func hintText(liveSupported: Bool, liveOn: Bool) -> String {
+        if liveOn && state.liveError == nil {
+            return "Checking your \(provider.displayName) plan limits…"
+        }
+        switch provider {
+        case .claude:
+            if state.bridgeInstalled {
+                return "Status line connected. Limits appear after your next message in Claude Code."
+            }
+            return liveSupported
+                ? "Show your 5-hour and weekly limits live, or connect Claude Code's status line."
+                : "Connect Claude Code's status line to see your 5-hour and weekly limits."
+        case .codex:
+            return liveSupported && !liveOn
+                ? "Limits appear after your next Codex reply, or show them live now."
+                : "Limits appear after your next Codex reply."
+        case .gemini:
+            return liveSupported
+                ? "Gemini CLI doesn't keep its quota on your Mac. Show it live."
+                : "Gemini CLI doesn't keep its quota on your Mac."
         }
     }
 

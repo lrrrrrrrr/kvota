@@ -13,7 +13,7 @@ struct MenuBarLabel: View {
             if let used = model.highestPercent() {
                 HStack(spacing: 3) {
                     Image(systemName: Theme.gaugeSymbol(used))
-                    Text(Format.percent(used))
+                    Text(model.settings.showRemaining ? "\(Format.percent(max(0, 100 - used))) left" : Format.percent(used))
                         .monospacedDigit()
                 }
             } else {
@@ -22,7 +22,8 @@ struct MenuBarLabel: View {
         case .perProvider:
             let parts = model.visibleProviders.compactMap { provider -> String? in
                 guard let used = model.state(for: provider).highestPercent(at: model.now) else { return nil }
-                return "\(provider.shortName) \(Int(used.rounded()))"
+                let value = model.settings.showRemaining ? max(0, 100 - used) : used
+                return "\(provider.shortName) \(Int(value.rounded()))%"
             }
             if parts.isEmpty {
                 Image(systemName: Theme.gaugeSymbol(nil))

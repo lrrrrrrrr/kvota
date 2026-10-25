@@ -147,15 +147,18 @@ struct Sparkline: View {
     }
 }
 
-/// One limit window: label, percentage, meter and reset countdown.
+/// One limit window: label, what's left (or used), meter and reset countdown.
 struct LimitRow: View {
     let window: LimitWindow
     let tint: Color
     let now: Date
     var dense = false
+    var showRemaining = true
 
     var body: some View {
         let used = window.usedPercent(at: now)
+        let left = window.remainingPercent(at: now)
+        let color = Theme.fill(for: used, tint: tint)
         VStack(alignment: .leading, spacing: dense ? 2 : 3) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(window.label)
@@ -163,19 +166,19 @@ struct LimitRow: View {
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
                 if let resets = window.resetsAt, !window.isExpired(at: now) {
-                    Text(dense ? Format.countdown(to: resets, from: now) : "resets in \(Format.countdown(to: resets, from: now))")
+                    Text("resets in \(Format.countdown(to: resets, from: now))")
                         .font(.system(size: dense ? 9 : 10))
                         .foregroundStyle(.tertiary)
                 }
-                Text(Format.percent(used))
+                Text(showRemaining ? "\(Format.percent(left)) left" : "\(Format.percent(used)) used")
                     .font(.system(size: dense ? 10 : 11, weight: .semibold))
                     .monospacedDigit()
-                    .foregroundStyle(used >= 75 ? Theme.fill(for: used, tint: tint) : Color.primary)
+                    .foregroundStyle(used >= 75 ? color : Color.primary)
             }
-            MeterBar(fraction: used / 100, color: Theme.fill(for: used, tint: tint), height: dense ? 4 : 5)
+            MeterBar(fraction: (showRemaining ? left : used) / 100, color: color, height: dense ? 4 : 5)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(window.label) limit \(Format.percent(used)) used")
+        .accessibilityLabel("\(window.label) limit: \(Format.percent(left)) left")
     }
 }
 
@@ -209,7 +212,9 @@ struct WidgetBackground: View {
                 // Translucent, so screenshots can be composed over a blurred wallpaper.
                 shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.74))
             } else {
-                VisualEffectBackground().clipShape(shape)
+                // A fairly solid material, so text behind the widget doesn't show through.
+                VisualEffectBackground(material: .popover).clipShape(shape)
+                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.55))
             }
             shape.strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
         }
