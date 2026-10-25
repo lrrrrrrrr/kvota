@@ -1,0 +1,66 @@
+name: Screenshots
+
+# Renders the app's views with sample data on a Mac runner, composes them onto a
+# generated wallpaper (scripts/compose-screenshots.py) and commits the results to
+# docs/screenshots, so the README always shows the current UI. No real desktop and
+# no personal data are involved. Raw renders are kept on the `renders` branch.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "KvotaKit/Sources/KvotaUI/**"
+      - "KvotaKit/Tests/KvotaUITests/**"
+      - "scripts/compose-screenshots.py"
+      - ".github/workflows/screenshots.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: screenshots
+  cancel-in-progress: true
+
+jobs:
+  render:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Render views
+        working-directory: KvotaKit
+        env:
+          KVOTA_SNAPSHOT_DIR: ${{ runner.temp }}/raw
+        run: swift test --filter SnapshotTests
+
+      - name: Compose screenshots
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet pillow
+          "$RUNNER_TEMP/venv/bin/python" scripts/compose-screenshots.py "$RUNNER_TEMP/raw" docs/screenshots
+
+      - name: Commit screenshots
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/screenshots
+          if git diff --cached --quiet; then
+            echo "Screenshots unchanged"
+          else
+            git commit -m "Update screenshots"
+            for attempt in 1 2 3; do
+              git pull --rebase origin main && git push origin HEAD:main && break
+              sleep 5
+            done
+          fi
+
+      - name: Publish raw renders
+        run: |
+          cd "$RUNNER_TEMP/raw"
+          git init -q -b renders
+          git add .
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Raw renders for ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" renders
