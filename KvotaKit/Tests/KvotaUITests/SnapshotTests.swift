@@ -70,7 +70,7 @@ final class SnapshotTests: XCTestCase {
         XCTAssertGreaterThan(size.width, 10, url.lastPathComponent)
         XCTAssertGreaterThan(size.height, 10, url.lastPathComponent)
 
-        let window = NSWindow(
+        let window = SnapshotWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless],
             backing: .buffered,
@@ -108,6 +108,12 @@ final class SnapshotTests: XCTestCase {
         }
         try png.write(to: url)
     }
+}
+
+/// Reports itself as the active window so controls draw in their active colors.
+private final class SnapshotWindow: NSWindow {
+    override var isKeyWindow: Bool { true }
+    override var isMainWindow: Bool { true }
 }
 
 /// The menu bar item next to a clock, as it appears at the top of the screen.

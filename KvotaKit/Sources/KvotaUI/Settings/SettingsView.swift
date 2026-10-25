@@ -40,6 +40,7 @@ final class SettingsSelection {
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.kvotaSnapshotMode) private var snapshotMode
     @Bindable var selection: SettingsSelection
 
     var body: some View {
@@ -57,7 +58,8 @@ struct SettingsView: View {
                 .tabItem { Label("About", systemImage: "info.circle") }
                 .tag(SettingsTab.about)
         }
-        .frame(width: 560, height: 520)
+        // Screenshots show whole sections instead of a scrolled view.
+        .frame(width: 560, height: snapshotMode ? 668 : 560)
     }
 }
 
