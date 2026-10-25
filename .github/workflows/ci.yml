@@ -80,11 +80,19 @@ jobs:
         if: failure()
         run: scripts/ci-annotate.sh "$RUNNER_TEMP"/*.log
 
+      - name: Package app
+        run: |
+          # A zip keeps the executable bit and code signature intact; --norsrc avoids
+          # AppleDouble files that would break the signature when unzipped elsewhere.
+          ditto -c -k --norsrc --keepParent build/Build/Products/Release/Kvota.app "$RUNNER_TEMP/Kvota.zip"
+          ls -la "$RUNNER_TEMP/Kvota.zip"
+
       - name: Upload app
         uses: actions/upload-artifact@v4
         with:
           name: Kvota-app
-          path: build/Build/Products/Release/Kvota.app
+          path: ${{ runner.temp }}/Kvota.zip
+          compression-level: 0
 
   linux:
     name: Linux — core tests
