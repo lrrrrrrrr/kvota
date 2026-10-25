@@ -1,0 +1,359 @@
+import AppKit
+import KvotaCore
+import SwiftUI
+
+public enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
+    case general, providers, widget, about
+    public var id: String { rawValue }
+}
+
+/// Hosts the settings in a regular window, which behaves better than the SwiftUI
+/// `Settings` scene in an app without a Dock icon.
+@MainActor
+final class SettingsWindowController {
+    static let shared = SettingsWindowController()
+    private var window: NSWindow?
+    private let selection = SettingsSelection()
+
+    func show(model: AppModel, tab: SettingsTab) {
+        selection.tab = tab
+        if window == nil {
+            let root = SettingsView(selection: selection).environment(model)
+            let window = NSWindow(contentViewController: NSHostingController(rootView: root))
+            window.title = "Kvota Settings"
+            window.styleMask = [.titled, .closable, .miniaturizable]
+            window.isReleasedWhenClosed = false
+            window.center()
+            _ = window.setFrameAutosaveName("KvotaSettings")
+            self.window = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+    }
+}
+
+@MainActor
+@Observable
+final class SettingsSelection {
+    var tab: SettingsTab = .general
+}
+
+struct SettingsView: View {
+    @Environment(AppModel.self) private var model
+    @Bindable var selection: SettingsSelection
+
+    var body: some View {
+        TabView(selection: $selection.tab) {
+            GeneralSettings()
+                .tabItem { Label("General", systemImage: "gearshape") }
+                .tag(SettingsTab.general)
+            ProvidersSettings()
+                .tabItem { Label("Providers", systemImage: "square.stack.3d.up") }
+                .tag(SettingsTab.providers)
+            WidgetSettings()
+                .tabItem { Label("Widget", systemImage: "rectangle.inset.topright.filled") }
+                .tag(SettingsTab.widget)
+            AboutSettings()
+                .tabItem { Label("About", systemImage: "info.circle") }
+                .tag(SettingsTab.about)
+        }
+        .frame(width: 560, height: 520)
+    }
+}
+
+// MARK: - General
+
+private struct GeneralSettings: View {
+    @Environment(AppModel.self) private var model
+    @State private var launchAtLogin = LoginItem.isEnabled
+    @State private var loginError: String?
+
+    var body: some View {
+        @Bindable var model = model
+        Form {
+            Section {
+                Toggle("Open Kvota at login", isOn: $launchAtLogin)
+                    .disabled(!LoginItem.isAvailable)
+                    .onChange(of: launchAtLogin) { _, enabled in
+                        do {
+                            try LoginItem.setEnabled(enabled)
+                            loginError = nil
+                        } catch {
+                            loginError = error.localizedDescription
+                            launchAtLogin = LoginItem.isEnabled
+                        }
+                    }
+                if let loginError {
+                    Text(loginError).font(.caption).foregroundStyle(.red)
+                }
+            }
+
+            Section("Menu bar") {
+                Picker("Show", selection: $model.settings.menuBarStyle) {
+                    ForEach(MenuBarStyle.allCases) { Text($0.title).tag($0) }
+                }
+                Toggle("Show estimated API cost next to token counts", isOn: $model.settings.showCost)
+            }
+
+            Section {
+                Toggle("Notify me when a limit gets close", isOn: $model.settings.notificationsEnabled)
+                Picker("Warn at", selection: $model.settings.warnThreshold) {
+                    ForEach([50, 70, 75, 80, 85, 90], id: \.self) { Text("\($0)%").tag($0) }
+                }
+                .disabled(!model.settings.notificationsEnabled)
+            } header: {
+                Text("Alerts")
+            } footer: {
+                Text("One notification per limit window at your threshold, and again at 95%.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: - Providers
+
+private struct ProvidersSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Form {
+            ForEach(ProviderID.allCases) { provider in
+                ProviderSection(provider: provider)
+            }
+            if model.supportsLiveLimits {
+                Section {
+                    Picker("Check live limits every", selection: liveInterval) {
+                        ForEach([2, 5, 10, 15, 30], id: \.self) { Text("\($0) minutes").tag($0) }
+                    }
+                } footer: {
+                    Text("Live limits use the login your CLI already has and talk only to that provider. They use endpoints the CLIs use internally, which can change without notice.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var liveInterval: Binding<Int> {
+        Binding(get: { model.settings.liveRefreshMinutes }, set: { model.settings.liveRefreshMinutes = $0 })
+    }
+}
+
+private struct ProviderSection: View {
+    @Environment(AppModel.self) private var model
+    let provider: ProviderID
+
+    var body: some View {
+        let state = model.state(for: provider)
+        Section {
+            Toggle("Show \(provider.displayName)", isOn: membership(\.enabledProviders))
+
+            LabeledContent("Data folder") {
+                HStack(spacing: 6) {
+                    Text(model.homeDisplayPath(for: provider))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    accessBadge(state.access)
+                    if model.isSandboxed {
+                        Button(state.access == .available ? "Change…" : "Grant Access…") {
+                            model.grantAccess(for: provider)
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            }
+
+            LabeledContent("Limits") {
+                Text(limitsSourceText)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+
+            if provider == .claude {
+                bridgeRow(state)
+            }
+
+            if model.supportsLiveLimits(for: provider) {
+                Toggle(isOn: membership(\.liveProviders)) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Live limits")
+                        Text(liveExplanation)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if let error = state.liveError, model.settings.liveProviders.contains(provider) {
+                    Text(error).font(.caption).foregroundStyle(.orange)
+                }
+            }
+        } header: {
+            HStack(spacing: 6) {
+                ProviderDot(provider: provider, size: 8)
+                Text(provider.toolName)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bridgeRow(_ state: ProviderState) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Status line bridge")
+                    Text("Claude Code shares your 5-hour and weekly usage with its status line. The bridge saves that for Kvota and keeps your current status line working.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                if state.bridgeInstalled {
+                    Button("Disconnect") { model.uninstallBridge() }
+                } else {
+                    Button("Connect") { model.installBridge() }
+                        .disabled(state.access != .available)
+                }
+            }
+            if let message = model.bridgeMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func accessBadge(_ access: DataAccess) -> some View {
+        switch access {
+        case .available:
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).help("Kvota can read this folder")
+        case .needsPermission:
+            Image(systemName: "lock.circle").foregroundStyle(.orange).help("Kvota needs your permission to read this folder")
+        case .notInstalled:
+            Image(systemName: "questionmark.circle").foregroundStyle(.secondary).help("Folder not found. Is \(provider.toolName) installed?")
+        case .unknown:
+            EmptyView()
+        }
+    }
+
+    private var limitsSourceText: String {
+        switch provider {
+        case .claude: "From the status line bridge" + (model.supportsLiveLimits(for: .claude) ? " or live" : "")
+        case .codex: "From Codex's session logs" + (model.supportsLiveLimits(for: .codex) ? " or live" : "")
+        case .gemini: model.supportsLiveLimits(for: .gemini) ? "Live only (Gemini CLI keeps no local copy)" : "Not available in this build"
+        }
+    }
+
+    private var liveExplanation: String {
+        switch provider {
+        case .claude:
+            "Asks Anthropic for your current usage with Claude Code's login. macOS asks once to allow Kvota to read the \"Claude Code-credentials\" Keychain item."
+        case .codex:
+            "Asks ChatGPT for your Codex limits with the login in ~/.codex/auth.json. Useful when you also use Codex in the cloud or the IDE."
+        case .gemini:
+            "Asks Google for your daily request quotas with the login in ~/.gemini/oauth_creds.json."
+        }
+    }
+
+    private func membership(_ keyPath: WritableKeyPath<AppSettings, Set<ProviderID>>) -> Binding<Bool> {
+        Binding(
+            get: { model.settings[keyPath: keyPath].contains(provider) },
+            set: { on in
+                if on {
+                    model.settings[keyPath: keyPath].insert(provider)
+                } else {
+                    model.settings[keyPath: keyPath].remove(provider)
+                }
+            }
+        )
+    }
+}
+
+// MARK: - Widget
+
+private struct WidgetSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        Form {
+            Section {
+                Toggle("Show floating widget", isOn: $model.settings.widgetVisible)
+                Picker("Style", selection: $model.settings.widgetStyle) {
+                    ForEach(WidgetStyle.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            Section("Behavior") {
+                Toggle("Keep above other windows", isOn: $model.settings.widgetOnTop)
+                Toggle("Show on every Space and over full-screen apps", isOn: $model.settings.widgetAllSpaces)
+                Toggle("Fade when the pointer is elsewhere", isOn: $model.settings.widgetFadeWhenIdle)
+                LabeledContent("Faded opacity") {
+                    Slider(value: $model.settings.widgetOpacity, in: 0.3...1)
+                        .frame(width: 200)
+                        .disabled(!model.settings.widgetFadeWhenIdle)
+                }
+                Toggle(isOn: $model.settings.widgetClickThrough) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Click-through")
+                        Text("Clicks pass to the window underneath. Turn this off here to move the widget again.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Section {
+                Button("Move Widget Back to the Top-Right Corner") { model.resetWidgetPosition() }
+            } footer: {
+                Text("Drag the widget to place it anywhere. Right-click it for quick options.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: - About
+
+private struct AboutSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(nsImage: NSApp.applicationIconImage ?? NSImage())
+                .resizable()
+                .frame(width: 84, height: 84)
+            VStack(spacing: 4) {
+                Text("Kvota").font(.title2.weight(.semibold))
+                Text(KvotaEnvironment.version).font(.callout).foregroundStyle(.secondary)
+            }
+            Text("Your Claude, Codex and Gemini limits at a glance.")
+                .foregroundStyle(.secondary)
+            Text(privacyText)
+                .font(.callout)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: 420)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 16) {
+                Link("Source code", destination: KvotaEnvironment.repositoryURL)
+                Link("How it works", destination: KvotaEnvironment.repositoryURL.appendingPathComponent("blob/main/docs/HOW_IT_WORKS.md"))
+                Link("Report an issue", destination: KvotaEnvironment.repositoryURL.appendingPathComponent("issues"))
+            }
+            .font(.callout)
+        }
+        .padding(30)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var privacyText: String {
+        model.supportsLiveLimits
+            ? "Kvota reads usage from files the CLIs already keep on your Mac. Nothing leaves your Mac unless you turn on live limits, which talk only to the provider you enable them for."
+            : "Kvota reads usage from files the CLIs already keep on your Mac and never connects to the internet."
+    }
+}

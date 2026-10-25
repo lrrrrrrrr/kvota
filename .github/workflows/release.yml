@@ -1,0 +1,107 @@
+name: Release
+
+# Push a tag like v0.1.0 to build Kvota.app and attach it to a GitHub release.
+# With the optional secrets below the app is signed with Developer ID and notarized;
+# without them it is ad-hoc signed (right-click → Open on first launch).
+#
+#   MACOS_CERTIFICATE           base64 of a Developer ID Application .p12
+#   MACOS_CERTIFICATE_PASSWORD  password of that .p12
+#   MACOS_TEAM_ID               Apple team ID
+#   NOTARY_APPLE_ID             Apple ID used for notarization
+#   NOTARY_PASSWORD             app-specific password for that Apple ID
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      HAS_SIGNING: ${{ secrets.MACOS_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          [[ "$tag" == v* ]] || tag="v0.0.0-dev"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Import Developer ID certificate
+        if: env.HAS_SIGNING == 'true'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(uuidgen)"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
+      - name: Build universal app
+        env:
+          TEAM_ID: ${{ secrets.MACOS_TEAM_ID }}
+        run: |
+          set -o pipefail
+          if [ "$HAS_SIGNING" = "true" ]; then
+            signing=(CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=Developer ID Application" DEVELOPMENT_TEAM="$TEAM_ID" OTHER_CODE_SIGN_FLAGS=--timestamp)
+          else
+            signing=(CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=)
+          fi
+          xcodebuild -project Kvota.xcodeproj -scheme Kvota -configuration Release \
+            -destination 'generic/platform=macOS' -derivedDataPath build \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            "${signing[@]}" build | tail -n 40
+          ditto -c -k --keepParent build/Build/Products/Release/Kvota.app "Kvota-${{ steps.version.outputs.version }}.zip"
+
+      - name: Notarize
+        if: env.HAS_SIGNING == 'true'
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          TEAM_ID: ${{ secrets.MACOS_TEAM_ID }}
+        run: |
+          zip="Kvota-${{ steps.version.outputs.version }}.zip"
+          xcrun notarytool submit "$zip" --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$TEAM_ID" --wait
+          xcrun stapler staple build/Build/Products/Release/Kvota.app
+          rm "$zip"
+          ditto -c -k --keepParent build/Build/Products/Release/Kvota.app "$zip"
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          zip="Kvota-${{ steps.version.outputs.version }}.zip"
+          shasum -a 256 "$zip" | tee "$zip.sha256"
+          notes="Download **$zip**, unzip and move Kvota to Applications."
+          if [ "$HAS_SIGNING" != "true" ]; then
+            notes="$notes This build is not notarized: the first time, right-click Kvota and choose Open."
+          fi
+          gh release create "${{ steps.version.outputs.tag }}" "$zip" "$zip.sha256" --title "Kvota ${{ steps.version.outputs.version }}" --notes "$notes" --generate-notes
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kvota-${{ steps.version.outputs.version }}
+          path: Kvota-*.zip

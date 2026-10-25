@@ -1,0 +1,15 @@
+// Shared build settings for both app targets.
+//
+// To sign with your own Apple developer account, create Config/Local.xcconfig
+// (git-ignored) and set, for example:
+//
+//   KVOTA_TEAM_ID = ABCDE12345
+//   KVOTA_BUNDLE_ID = com.yourname.kvota
+
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+KVOTA_BUNDLE_ID = io.github.lrrrrrrrr.kvota
+KVOTA_TEAM_ID =
+
+#include? "Local.xcconfig"

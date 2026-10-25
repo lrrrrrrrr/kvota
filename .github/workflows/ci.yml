@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS — tests, snapshots, app builds
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Test KvotaKit (core + UI snapshots)
+        working-directory: KvotaKit
+        env:
+          KVOTA_SNAPSHOT_DIR: ${{ runner.temp }}/snapshots
+        run: swift test
+
+      - name: Upload UI snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshots
+          path: ${{ runner.temp }}/snapshots
+          if-no-files-found: ignore
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build direct-download app
+        run: |
+          set -o pipefail
+          xcodebuild -project Kvota.xcodeproj -scheme Kvota -configuration Release \
+            -destination 'generic/platform=macOS' -derivedDataPath build \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            build | tail -n 40
+
+      - name: Build App Store app
+        run: |
+          set -o pipefail
+          xcodebuild -project Kvota.xcodeproj -scheme KvotaAppStore -configuration Release \
+            -destination 'generic/platform=macOS' -derivedDataPath build \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            build | tail -n 40
+
+      - name: Check bundles
+        run: |
+          for app in build/Build/Products/Release/Kvota.app build/Build/Products/Release/KvotaAppStore.app; do
+            echo "== $app"
+            /usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$app/Contents/Info.plist"
+            du -sh "$app"
+            codesign -d --entitlements - "$app" 2>/dev/null | grep -E 'app-sandbox|user-selected' || echo "(no sandbox entitlements)"
+          done
+          # The App Store build must not contain the live-limits code.
+          if strings build/Build/Products/Release/KvotaAppStore.app/Contents/MacOS/KvotaAppStore | grep -q 'backend-api/wham'; then
+            echo "App Store build unexpectedly contains live-limit endpoints"; exit 1
+          fi
+
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kvota-app
+          path: build/Build/Products/Release/Kvota.app
+
+  linux:
+    name: Linux — core tests
+    runs-on: ubuntu-24.04
+    container: swift:6.1-noble
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test KvotaCore
+        run: swift test --package-path KvotaKit

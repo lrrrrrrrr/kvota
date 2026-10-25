@@ -1,0 +1,278 @@
+import Foundation
+import KvotaCore
+import Security
+
+/// Fetches current limits from each provider using the login its CLI already has.
+///
+/// Only in the direct-download build, and only for providers the user turns on.
+/// Credentials are read on demand, kept in memory, and never written anywhere.
+public final class LiveLimitsClient: LiveLimitsProvider, @unchecked Sendable {
+    public let supportedProviders: [ProviderID] = [.claude, .codex, .gemini]
+
+    private let session: URLSession
+    private let lock = NSLock()
+    private var claudeCredentials: ClaudeCredentials?
+    private var gemini = GeminiSession()
+
+    public init() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = 30
+        configuration.httpCookieStorage = nil
+        configuration.urlCache = nil
+        configuration.httpAdditionalHeaders = ["User-Agent": "Kvota (+https://github.com/lrrrrrrrr/kvota)"]
+        session = URLSession(configuration: configuration)
+    }
+
+    public func fetchLimits(for provider: ProviderID, home: URL) async throws -> LimitsSnapshot {
+        switch provider {
+        case .claude: return try await fetchClaude(home: home)
+        case .codex: return try await fetchCodex(home: home)
+        case .gemini: return try await fetchGemini(home: home)
+        }
+    }
+
+    // MARK: - Claude
+
+    private func fetchClaude(home: URL) async throws -> LimitsSnapshot {
+        let credentials = try loadClaudeCredentials(home: home)
+        var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
+        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let data = try await send(request, provider: "Claude") { status in
+            switch status {
+            case 401:
+                self.withLock { self.claudeCredentials = nil }
+                return "Claude Code's login has expired. Run claude once to refresh it."
+            case 403:
+                return "This Claude Code login can't read plan usage. Sign in with a Claude Pro or Max account."
+            default:
+                return nil
+            }
+        }
+        guard let snapshot = ClaudeLimits.parseOAuthUsage(
+            data, capturedAt: Date(), plan: ClaudeLimits.planName(credentials.subscriptionType)
+        ) else {
+            throw KvotaError("Claude returned usage in an unexpected format.")
+        }
+        return snapshot
+    }
+
+    private func loadClaudeCredentials(home: URL) throws -> ClaudeCredentials {
+        let now = Date()
+        if let cached = withLock({ claudeCredentials }), !cached.isExpired(at: now) {
+            return cached
+        }
+        // Linux-style file first (also used by some setups on macOS), then the Keychain item
+        // Claude Code creates on macOS. Reading it shows a one-time macOS permission prompt.
+        var candidates: [ClaudeCredentials] = []
+        if let data = try? Data(contentsOf: home.appendingPathComponent(".credentials.json")),
+           let parsed = ClaudeCredentials.parse(data) {
+            candidates.append(parsed)
+        }
+        if candidates.allSatisfy({ $0.isExpired(at: now) }),
+           let data = Keychain.genericPassword(service: "Claude Code-credentials"),
+           let parsed = ClaudeCredentials.parse(data) {
+            candidates.append(parsed)
+        }
+        guard !candidates.isEmpty else {
+            throw KvotaError("No Claude Code login found. Sign in with claude first, or allow Kvota to read the \"Claude Code-credentials\" Keychain item.")
+        }
+        guard let valid = candidates.first(where: { !$0.isExpired(at: now) }) else {
+            throw KvotaError("Claude Code's login has expired. Run claude once to refresh it.")
+        }
+        withLock { claudeCredentials = valid }
+        return valid
+    }
+
+    // MARK: - Codex
+
+    private func fetchCodex(home: URL) async throws -> LimitsSnapshot {
+        guard let data = try? Data(contentsOf: home.appendingPathComponent("auth.json")) else {
+            throw KvotaError("No Codex login found in ~/.codex/auth.json. Sign in with codex first.")
+        }
+        guard let credentials = CodexCredentials.parse(data) else {
+            throw KvotaError("Codex is using an API key, which has no plan limits to show.")
+        }
+        var request = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/wham/usage")!)
+        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let account = credentials.accountID {
+            request.setValue(account, forHTTPHeaderField: "ChatGPT-Account-Id")
+        }
+        let body = try await send(request, provider: "Codex") { status in
+            status == 401 || status == 403 ? "Codex's login has expired. Run codex once to refresh it." : nil
+        }
+        guard let snapshot = CodexLimits.parseUsage(body, capturedAt: Date()) else {
+            throw KvotaError("ChatGPT returned Codex usage in an unexpected format.")
+        }
+        return snapshot
+    }
+
+    // MARK: - Gemini
+
+    private struct GeminiSession {
+        var accessToken: String?
+        var expiresAt: Date?
+        var project: String?
+        var plan: String?
+        var projectCheckedAt: Date?
+        var client: GeminiOAuthClient?
+        var clientSearched = false
+    }
+
+    private static let codeAssist = "https://cloudcode-pa.googleapis.com/v1internal"
+
+    private func fetchGemini(home: URL) async throws -> LimitsSnapshot {
+        let token = try await geminiAccessToken(home: home)
+
+        let needsProject = withLock { () -> Bool in
+            guard let checked = gemini.projectCheckedAt else { return true }
+            return Date().timeIntervalSince(checked) > 3600
+        }
+        if needsProject {
+            let body: [String: Any] = [
+                "metadata": ["ideType": "IDE_UNSPECIFIED", "platform": "PLATFORM_UNSPECIFIED", "pluginType": "GEMINI"],
+            ]
+            let data = try await postJSON("\(Self.codeAssist):loadCodeAssist", token: token, body: body)
+            let parsed = GeminiLimits.parsePlan(data)
+            withLock {
+                gemini.plan = parsed.plan
+                gemini.project = parsed.project
+                gemini.projectCheckedAt = Date()
+            }
+        }
+
+        let (project, plan) = withLock { (gemini.project, gemini.plan) }
+        var body: [String: Any] = [:]
+        if let project { body["project"] = project }
+        let data = try await postJSON("\(Self.codeAssist):retrieveUserQuota", token: token, body: body)
+        guard let snapshot = GeminiLimits.parseQuota(data, capturedAt: Date(), plan: plan) else {
+            throw KvotaError("Google returned no quota information for this Gemini login.")
+        }
+        return snapshot
+    }
+
+    private func geminiAccessToken(home: URL) async throws -> String {
+        let now = Date()
+        if let token = withLock({ () -> String? in
+            guard let token = gemini.accessToken, let expires = gemini.expiresAt, expires.timeIntervalSince(now) > 60 else { return nil }
+            return token
+        }) {
+            return token
+        }
+
+        guard let data = try? Data(contentsOf: home.appendingPathComponent("oauth_creds.json")),
+              let credentials = GeminiCredentials.parse(data) else {
+            throw KvotaError("No Gemini CLI Google login found in ~/.gemini/oauth_creds.json.")
+        }
+        if credentials.hasValidAccessToken(at: now), let token = credentials.accessToken {
+            return token
+        }
+
+        // Gemini CLI's token lasts an hour and is renewed only while the CLI runs. Renew it in
+        // memory with the CLI's own public OAuth client, read from the installed CLI.
+        guard let refreshToken = credentials.refreshToken else {
+            throw KvotaError("Gemini CLI's login has expired. Run gemini once to refresh it.")
+        }
+        let client: GeminiOAuthClient? = withLock {
+            if !gemini.clientSearched {
+                gemini.clientSearched = true
+                gemini.client = GeminiOAuthClient.locate(home: home.deletingLastPathComponent())
+            }
+            return gemini.client
+        }
+        guard let client else {
+            throw KvotaError("Gemini CLI's login has expired. Run gemini once to refresh it.")
+        }
+
+        var request = URLRequest(url: URL(string: "https://oauth2.googleapis.com/token")!)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Self.formEncode([
+            "client_id": client.id,
+            "client_secret": client.secret,
+            "refresh_token": refreshToken,
+            "grant_type": "refresh_token",
+        ])
+        let response = try await send(request, provider: "Google") { status in
+            status == 400 || status == 401 ? "Gemini CLI's login has expired. Run gemini once to refresh it." : nil
+        }
+        guard let json = (try? JSONSerialization.jsonObject(with: response)) as? [String: Any],
+              let token = json["access_token"] as? String else {
+            throw KvotaError("Google didn't renew the Gemini login.")
+        }
+        let lifetime = (json["expires_in"] as? Double) ?? Double(json["expires_in"] as? Int ?? 3000)
+        withLock {
+            gemini.accessToken = token
+            gemini.expiresAt = Date().addingTimeInterval(lifetime)
+        }
+        return token
+    }
+
+    private func postJSON(_ url: String, token: String, body: [String: Any]) async throws -> Data {
+        var request = URLRequest(url: URL(string: url)!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await send(request, provider: "Gemini") { status in
+            if status == 401 {
+                self.withLock { self.gemini.accessToken = nil }
+                return "Gemini CLI's login was rejected. Run gemini once to refresh it."
+            }
+            return nil
+        }
+    }
+
+    // MARK: - Plumbing
+
+    private func send(_ request: URLRequest, provider: String, explain: (Int) -> String?) async throws -> Data {
+        let result: (Data, URLResponse)
+        do {
+            result = try await session.data(for: request)
+        } catch {
+            throw KvotaError("Couldn't reach \(provider): \(error.localizedDescription)")
+        }
+        let (data, response) = result
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            if let message = explain(status) { throw KvotaError(message) }
+            if status == 429 { throw KvotaError("\(provider) is rate limiting usage checks. Kvota will try again later.") }
+            throw KvotaError("\(provider) answered with HTTP \(status).")
+        }
+        return data
+    }
+
+    private func withLock<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+
+    static func formEncode(_ fields: [String: String]) -> Data {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        let pairs = fields.sorted { $0.key < $1.key }.map { key, value in
+            "\(key)=\(value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value)"
+        }
+        return Data(pairs.joined(separator: "&").utf8)
+    }
+}
+
+/// Reads a generic password item without changing it.
+enum Keychain {
+    static func genericPassword(service: String) -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
+        return item as? Data
+    }
+}

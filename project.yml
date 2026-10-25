@@ -1,0 +1,70 @@
+# XcodeGen spec. Generate the Xcode project with:
+#   brew install xcodegen && xcodegen generate
+# (or `make project`). The .xcodeproj is not committed.
+name: Kvota
+options:
+  bundleIdPrefix: io.github.lrrrrrrrr
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+configFiles:
+  Debug: Config/Kvota.xcconfig
+  Release: Config/Kvota.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    INFOPLIST_FILE: App/Info.plist
+    GENERATE_INFOPLIST_FILE: NO
+    PRODUCT_BUNDLE_IDENTIFIER: $(KVOTA_BUNDLE_ID)
+    DEVELOPMENT_TEAM: $(KVOTA_TEAM_ID)
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_HARDENED_RUNTIME: YES
+    DEAD_CODE_STRIPPING: YES
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    COMBINE_HIDPI_IMAGES: YES
+
+packages:
+  KvotaKit:
+    path: KvotaKit
+
+targets:
+  # Direct download (GitHub Releases / Homebrew): not sandboxed, optional live limits.
+  Kvota:
+    type: application
+    platform: macOS
+    sources:
+      - App/Sources
+      - App/Resources
+    dependencies:
+      - package: KvotaKit
+        product: KvotaUI
+      - package: KvotaKit
+        product: KvotaLive
+    settings:
+      base:
+        PRODUCT_NAME: Kvota
+        CODE_SIGN_ENTITLEMENTS: App/Kvota.entitlements
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) KVOTA_DIRECT
+    scheme: {}
+
+  # Mac App Store: sandboxed, no network, local files only.
+  KvotaAppStore:
+    type: application
+    platform: macOS
+    sources:
+      - App/Sources
+      - App/Resources
+    dependencies:
+      - package: KvotaKit
+        product: KvotaUI
+    settings:
+      base:
+        PRODUCT_NAME: KvotaAppStore
+        CODE_SIGN_ENTITLEMENTS: App/KvotaAppStore.entitlements
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) KVOTA_APPSTORE
+    scheme: {}
