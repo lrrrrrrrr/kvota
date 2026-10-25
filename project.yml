@@ -33,7 +33,7 @@ packages:
     path: KvotaKit
 
 targets:
-  # Direct download (GitHub Releases / Homebrew): not sandboxed, optional live limits.
+  # Direct download (GitHub Releases / Homebrew): not sandboxed, reads the tools' folders directly.
   Kvota:
     type: application
     platform: macOS
@@ -43,16 +43,13 @@ targets:
     dependencies:
       - package: KvotaKit
         product: KvotaUI
-      - package: KvotaKit
-        product: KvotaLive
     settings:
       base:
         PRODUCT_NAME: Kvota
         CODE_SIGN_ENTITLEMENTS: App/Kvota.entitlements
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) KVOTA_DIRECT
     scheme: {}
 
-  # Mac App Store: sandboxed, no network, local files only.
+  # Mac App Store: sandboxed; the user grants access to each tool's folder once.
   KvotaAppStore:
     type: application
     platform: macOS

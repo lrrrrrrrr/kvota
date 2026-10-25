@@ -2,7 +2,7 @@
 import PackageDescription
 
 // KvotaCore is plain Foundation and builds on macOS and Linux, so the parsers can be
-// tested anywhere. The UI, the live-limits clients and the dev launcher are macOS-only.
+// tested anywhere. The UI and the dev launcher are macOS-only.
 var products: [Product] = [
     .library(name: "KvotaCore", targets: ["KvotaCore"]),
 ]
@@ -21,13 +21,11 @@ var targets: [Target] = [
 #if os(macOS)
 products += [
     .library(name: "KvotaUI", targets: ["KvotaUI"]),
-    .library(name: "KvotaLive", targets: ["KvotaLive"]),
     .executable(name: "kvota-dev", targets: ["KvotaDev"]),
 ]
 targets += [
     .target(name: "KvotaUI", dependencies: ["KvotaCore"]),
-    .target(name: "KvotaLive", dependencies: ["KvotaCore"]),
-    .executableTarget(name: "KvotaDev", dependencies: ["KvotaUI", "KvotaLive"]),
+    .executableTarget(name: "KvotaDev", dependencies: ["KvotaUI"]),
     .testTarget(name: "KvotaUITests", dependencies: ["KvotaUI"]),
 ]
 #endif

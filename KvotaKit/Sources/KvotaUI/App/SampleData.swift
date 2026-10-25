@@ -8,9 +8,8 @@ enum SampleData {
         var settings = AppSettings()
         settings.widgetStyle = style
         settings.hasLaunchedBefore = true
-        settings.liveProviders = [.gemini]
         settings.notificationsEnabled = true
-        return AppModel(preview: settings, states: states(now: now), now: now, liveProvider: SampleLiveProvider())
+        return AppModel(preview: settings, states: states(now: now), now: now)
     }
 
     static func states(now: Date) -> [ProviderState] {
@@ -51,16 +50,6 @@ enum SampleData {
 
         var gemini = ProviderState(provider: .gemini)
         gemini.access = .available
-        gemini.liveLimits = LimitsSnapshot(
-            provider: .gemini,
-            windows: [
-                LimitWindow(id: "model-gemini-2.5-pro", label: "2.5 Pro", usedPercent: 24, resetsAt: hours(13), duration: 86_400),
-                LimitWindow(id: "model-gemini-2.5-flash", label: "2.5 Flash", usedPercent: 6, resetsAt: hours(13), duration: 86_400),
-            ],
-            plan: "Free",
-            capturedAt: now.addingTimeInterval(-120),
-            source: .live
-        )
         gemini.usage = usage(.gemini, now: now, today: 1_300_000, cost: 1.1, week: [0, 2, 1, 0, 0, 3, 1.3], models: [
             ("gemini-2.5-pro", 1_300_000, 1.1),
         ])
@@ -93,14 +82,5 @@ enum SampleData {
             lastActivity: now.addingTimeInterval(-90),
             filesTracked: 42
         )
-    }
-}
-
-/// Stands in for the live-limits client so previews show the direct build's options.
-final class SampleLiveProvider: LiveLimitsProvider, @unchecked Sendable {
-    let supportedProviders: [ProviderID] = [.codex, .gemini]
-
-    func fetchLimits(for provider: ProviderID, home: URL) async throws -> LimitsSnapshot {
-        throw KvotaError("Sample data")
     }
 }

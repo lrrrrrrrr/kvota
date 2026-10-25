@@ -22,7 +22,7 @@ struct WidgetView: View {
         .contextMenu { menu }
     }
 
-    private var providers: [ProviderID] { model.visibleProviders }
+    private var providers: [ProviderID] { model.widgetProviders }
 
     // MARK: Compact: one ring and what's left per provider
 
@@ -177,9 +177,7 @@ private struct CompactItem: View {
     }
 
     private func primaryText(_ used: Double?) -> String {
-        guard let used else {
-            return state.liveError != nil ? "Not connected" : "No limits yet"
-        }
+        guard let used else { return state.noLimits.headline }
         return showRemaining ? "\(Format.percent(max(0, 100 - used))) left" : "\(Format.percent(used)) used"
     }
 
@@ -190,28 +188,26 @@ private struct CompactItem: View {
             }
             return window.label
         }
-        if state.liveError != nil {
-            return state.liveErrorHint ?? "click for details"
-        }
-        if state.provider == .claude, state.bridgeInstalled {
-            return ClaudeBridgeStatus.short(for: state.bridgeLastRun)
-        }
-        return "click to set up"
+        return state.noLimits.hint
     }
 
     private var helpText: String {
         var lines: [String] = []
         if let limits = state.limits {
             for window in limits.windows {
+                guard !window.isExpired(at: now) else {
+                    lines.append("\(window.label): reset since the last reading")
+                    continue
+                }
                 var line = "\(window.label): \(Format.percent(window.remainingPercent(at: now))) left"
-                if let resets = window.resetsAt, !window.isExpired(at: now) {
+                if let resets = window.resetsAt {
                     line += ", resets in \(Format.countdown(to: resets, from: now))"
                 }
                 lines.append(line)
             }
+            lines.append("Read \(Format.ago(limits.capturedAt, now: now)) from the \(limits.source.displayName)")
             if let detail = limits.detail { lines.append(detail) }
         }
-        if let error = state.liveError { lines.append(error) }
         if let usage = state.usage, usage.hasActivity {
             lines.append("Today: \(Format.tokens(usage.today.tokens.total)) tokens")
         }
@@ -249,9 +245,7 @@ private struct DetailedItem: View {
                     LimitRow(window: window, tint: provider.tint, now: now, dense: true, showRemaining: showRemaining)
                 }
             } else {
-                Text(state.liveError != nil
-                     ? "\(state.liveErrorHint ?? "Can't load limits"). Click for details."
-                     : "No limit data yet. Click to set up.")
+                Text("\(state.noLimits.headline) · \(state.noLimits.hint)")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }

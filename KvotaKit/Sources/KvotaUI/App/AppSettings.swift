@@ -51,10 +51,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var widgetOnTop = true
     public var widgetAllSpaces = true
 
-    /// Providers whose limits are also fetched live (direct build only).
-    public var liveProviders: Set<ProviderID> = []
-    public var liveRefreshMinutes = 5
-
     public var notificationsEnabled = false
     public var warnThreshold = 80
 
@@ -68,7 +64,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case enabledProviders, menuBarStyle, showCost, showRemaining
         case widgetVisible, widgetStyle, widgetOpacity, widgetFadeWhenIdle, widgetClickThrough, widgetOnTop, widgetAllSpaces
-        case liveProviders, liveRefreshMinutes
         case notificationsEnabled, warnThreshold
         case hasLaunchedBefore, settingsVersion
     }
@@ -106,8 +101,6 @@ extension AppSettings {
         widgetClickThrough = value(.widgetClickThrough, widgetClickThrough)
         widgetOnTop = value(.widgetOnTop, widgetOnTop)
         widgetAllSpaces = value(.widgetAllSpaces, widgetAllSpaces)
-        liveProviders = value(.liveProviders, liveProviders)
-        liveRefreshMinutes = max(1, value(.liveRefreshMinutes, liveRefreshMinutes))
         notificationsEnabled = value(.notificationsEnabled, notificationsEnabled)
         warnThreshold = min(99, max(10, value(.warnThreshold, warnThreshold)))
         hasLaunchedBefore = value(.hasLaunchedBefore, hasLaunchedBefore)

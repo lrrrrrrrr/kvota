@@ -172,31 +172,6 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(engine.summary(.claude, now: now, calendar: utc).today.requests, 0)
     }
 
-    func testFiveHourSessionsFromLogs() throws {
-        let home = try TempHome()
-        // now = 12:00 UTC. A finished session 01:10–02:30, then one that started at 09:40.
-        func at(_ hour: Double) -> Date { now.addingTimeInterval((hour - 12) * 3600) }
-        try home.write("projects/p/s.jsonl", [
-            Lines.claude(id: "a", at: at(1.17), output: 500),
-            Lines.claude(id: "b", at: at(2.5), output: 500),
-            Lines.claude(id: "c", at: at(9.67), output: 50),
-            Lines.claude(id: "d", at: at(11.5), output: 50),
-        ].joined(separator: "\n") + "\n")
-        let engine = UsageEngine()
-        engine.scan(.claude, home: home.root, now: now)
-        let summary = engine.summary(.claude, now: now, calendar: utc)
-
-        let block = try XCTUnwrap(summary.currentBlock)
-        XCTAssertEqual(block.start, at(9))          // the hour of the first request
-        XCTAssertEqual(block.end, at(14))           // five hours later
-        XCTAssertEqual(block.totals.requests, 2)
-        XCTAssertGreaterThan(summary.heaviestBlockTokens, block.totals.tokens.total)
-
-        // After the session ends there is no current block.
-        let later = engine.summary(.claude, now: at(14.5), calendar: utc)
-        XCTAssertNil(later.currentBlock)
-    }
-
     func testMissingFoldersAreHarmless() throws {
         let home = try TempHome()
         let engine = UsageEngine()

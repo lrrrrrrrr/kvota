@@ -1,25 +1,18 @@
 #!/usr/bin/env python3
 """Kvota doctor: checks what Kvota can read on this Mac for Claude Code, Codex CLI and
-Gemini CLI, and whether each provider's usage endpoint answers.
+Gemini CLI.
 
-    python3 kvota-doctor.py            # local checks + one test request per provider
-    python3 kvota-doctor.py --offline  # local checks only
+    python3 kvota-doctor.py
 
-It never prints tokens or keys: only whether they exist, when they expire, plan names
-and HTTP status codes. Uses only the Python standard library and macOS's own tools.
+It only looks at local files, like Kvota itself: it never reads a login token and never
+contacts any server. Uses only the Python standard library.
 """
-import base64
 import datetime as dt
-import hashlib
 import json
 import os
 import pathlib
-import shutil
-import subprocess
-import sys
 
 HOME = pathlib.Path.home()
-OFFLINE = "--offline" in sys.argv
 NOW = dt.datetime.now(dt.timezone.utc)
 
 
@@ -51,15 +44,6 @@ def when(epoch):
     return f"{moment.astimezone():%Y-%m-%d %H:%M} ({'in ' + span if delta.total_seconds() > 0 else span + ' ago'})"
 
 
-def jwt_exp(token):
-    try:
-        payload = token.split(".")[1]
-        payload += "=" * (-len(payload) % 4)
-        return json.loads(base64.urlsafe_b64decode(payload)).get("exp")
-    except Exception:
-        return None
-
-
 def read_json(path):
     try:
         return json.loads(pathlib.Path(path).read_text())
@@ -69,69 +53,12 @@ def read_json(path):
         return {"__error__": str(error)}
 
 
-def curl(url, headers, method="GET", body=None):
-    """Runs curl with headers passed on stdin, so tokens never appear in the process list."""
-    if OFFLINE:
-        return None, None
-    header_text = "".join(f"{k}: {v}\n" for k, v in headers.items())
-    args = ["/usr/bin/curl", "-sS", "-m", "15", "-X", method, "-H", "@-", "-w", "\n%{http_code}", url]
-    if body is not None:
-        args[1:1] = ["--data-binary", body]
-    try:
-        out = subprocess.run(args, input=header_text, capture_output=True, text=True, timeout=20)
-    except Exception as error:
-        return None, str(error)
-    if out.returncode != 0:
-        return None, out.stderr.strip() or f"curl exit {out.returncode}"
-    text, _, code = out.stdout.rpartition("\n")
-    try:
-        return int(code), text
-    except ValueError:
-        return None, out.stdout[-200:]
-
-
-def keychain_services(prefix):
-    try:
-        dump = subprocess.run(["/usr/bin/security", "dump-keychain"], capture_output=True, text=True, timeout=20).stdout
-    except Exception:
-        return []
-    names = set()
-    for line in dump.splitlines():
-        line = line.strip()
-        if line.startswith('"svce"') and prefix.lower() in line.lower():
-            value = line.split("=", 1)[-1].strip().strip('"')
-            names.add(value)
-    return sorted(names)
-
-
-def keychain_secret(service, account=None):
-    args = ["/usr/bin/security", "find-generic-password", "-s", service]
-    if account:
-        args += ["-a", account]
-    try:
-        out = subprocess.run(
-            args + ["-w"],
-            capture_output=True, text=True, timeout=60,
-        )
-    except Exception as error:
-        return None, str(error)
-    if out.returncode != 0:
-        return None, out.stderr.strip()
-    text = out.stdout.strip()
-    if text and not text.startswith("{"):
-        try:
-            text = bytes.fromhex(text).decode()
-        except ValueError:
-            pass
-    return text, None
-
-
 def limits_line(windows):
     parts = []
     for name, window in windows:
         if not isinstance(window, dict):
             continue
-        used = window.get("utilization", window.get("used_percent"))
+        used = window.get("used_percent")
         if used is None:
             continue
         parts.append(f"{name} {100 - float(used):.0f}% left")
@@ -171,16 +98,11 @@ def check_claude():
     else:
         info("status line bridge not connected")
 
-    # Kvota never uses Claude sign-in tokens (Anthropic doesn't allow third-party apps to),
-    # so only check that Claude Code is signed in, without reading the token.
-    if (folder / ".credentials.json").exists():
-        ok("Claude Code login file exists (~/.claude/.credentials.json)")
-    services = keychain_services("Claude Code")
-    if services:
-        ok(f"Claude Code is signed in (Keychain: {', '.join(services)})")
-    elif not (folder / ".credentials.json").exists():
-        warn("no Claude Code sign-in found for the claude command-line tool (run claude, then /login)")
-    info("Kvota shows Claude limits from Claude Code's status line (Pro/Max, claude command-line tool)")
+    run = read_json(folder / "kvota" / "last_run.json")
+    if isinstance(run, dict) and run.get("at"):
+        info(f"status line last ran {when(run['at'])}; "
+             f"limits included: {'yes' if run.get('rate_limits') else 'no'}")
+    info("Without the status line, Kvota estimates the 5-hour session and week from these logs")
 
 
 # ---------------------------------------------------------------- Codex
@@ -194,53 +116,33 @@ def check_codex():
     ok("~/.codex exists")
     rollouts = list((folder / "sessions").rglob("rollout-*.jsonl*"))
     info(f"{len(rollouts)} session logs in ~/.codex/sessions")
-    if rollouts:
-        newest = max(rollouts, key=lambda p: p.stat().st_mtime)
-        info(f"newest session log: {when(newest.stat().st_mtime)}")
-    auth = read_json(folder / "auth.json")
-    if auth:
-        ok("login file ~/.codex/auth.json found")
-    else:
-        account = "cli|" + hashlib.sha256(str(folder.resolve()).encode()).hexdigest()[:16]
-        secret, error = keychain_secret("Codex Auth", account)
-        if secret:
-            ok('login found in the Keychain ("Codex Auth")')
+    if not rollouts:
+        warn("no session logs yet: limits appear after your first Codex reply")
+        return
+    newest = max(rollouts, key=lambda p: p.stat().st_mtime)
+    info(f"newest session log: {when(newest.stat().st_mtime)}")
+    if newest.suffix == ".zst":
+        info("newest log is compressed; Kvota reads it, this script doesn't")
+        return
+    limits = None
+    try:
+        for line in newest.read_text(errors="replace").splitlines():
+            if '"rate_limits"' not in line:
+                continue
             try:
-                auth = json.loads(secret)
+                payload = (json.loads(line).get("payload") or {})
             except json.JSONDecodeError:
-                bad("Keychain login isn't the expected JSON")
-                return
-        else:
-            bad("no Codex CLI login (no ~/.codex/auth.json and nothing in the Keychain): run codex and sign in with ChatGPT")
-            others = keychain_services("codex")
-            if others:
-                info(f"Keychain items mentioning codex: {', '.join(others)}")
-            return
-    if auth.get("OPENAI_API_KEY"):
-        warn("auth.json holds an API key (API keys have no plan limits)")
-    tokens = auth.get("tokens") or {}
-    token = tokens.get("access_token")
-    if not token:
-        bad("no ChatGPT login tokens in auth.json")
+                continue
+            if isinstance(payload.get("rate_limits"), dict):
+                limits = payload["rate_limits"]
+    except OSError as error:
+        bad(f"couldn't read the newest log: {error}")
         return
-    ok("ChatGPT login found")
-    exp = jwt_exp(token)
-    info(f"access token expires {when(exp)}; last refreshed {auth.get('last_refresh', 'unknown')}")
-    if exp and exp < NOW.timestamp():
-        warn("token expired: run codex once and it renews it")
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "Kvota"}
-    if tokens.get("account_id"):
-        headers["ChatGPT-Account-Id"] = tokens["account_id"]
-    status, body = curl("https://chatgpt.com/backend-api/wham/usage", headers)
-    if status is None and body is None:
-        return
-    if status == 200:
-        data = json.loads(body)
-        rate = data.get("rate_limit") or {}
-        ok(f"usage endpoint ({data.get('plan_type', 'plan unknown')}): "
-           + limits_line([("5-hour", rate.get("primary_window")), ("weekly", rate.get("secondary_window"))]))
+    if limits:
+        ok("limits found in the newest log: "
+           + limits_line([("5-hour", limits.get("primary")), ("weekly", limits.get("secondary"))]))
     else:
-        bad(f"usage endpoint answered {status or 'nothing'}: {(body or '')[:160]}")
+        warn("the newest log has no limits (API-key sign-ins have none)")
 
 
 # ---------------------------------------------------------------- Gemini
@@ -254,78 +156,16 @@ def check_gemini():
     ok("~/.gemini exists")
     chats = list((folder / "tmp").glob("*/chats/session-*"))
     info(f"{len(chats)} chat recordings in ~/.gemini/tmp")
-    settings = read_json(folder / "settings.json") or {}
-    auth_type = (((settings.get("security") or {}).get("auth") or {}).get("selectedType")
-                 or settings.get("selectedAuthType")) if isinstance(settings, dict) else None
-    if auth_type:
-        info(f"sign-in method: {auth_type}")
-        if auth_type in ("gemini-api-key", "vertex-ai"):
-            warn("API key / Vertex sign-in: no Code Assist quota to show")
-    gemini = shutil.which("gemini")
-    info(f"gemini command: {gemini or 'not on PATH in this shell'}")
-    creds = read_json(folder / "oauth_creds.json")
-    if creds:
-        ok("Google sign-in found in ~/.gemini/oauth_creds.json")
+    if chats:
+        newest = max(chats, key=lambda p: p.stat().st_mtime)
+        info(f"newest chat recording: {when(newest.stat().st_mtime)}")
     else:
-        secret, _ = keychain_secret("gemini-cli-oauth", "main-account")
-        token = None
-        if secret:
-            try:
-                token = json.loads(secret).get("token")
-            except json.JSONDecodeError:
-                token = None
-        if not token:
-            bad("no Gemini CLI Google sign-in (no ~/.gemini/oauth_creds.json and nothing in the Keychain): run gemini, Login with Google")
-            services = keychain_services("gemini")
-            if services:
-                info(f"Keychain items mentioning gemini: {', '.join(services)}")
-            return
-        ok('Google sign-in found in the Keychain ("gemini-cli-oauth")')
-        creds = {
-            "access_token": token.get("accessToken"),
-            "refresh_token": token.get("refreshToken"),
-            "expiry_date": token.get("expiresAt"),
-        }
-    info(f"access token expires {when(creds.get('expiry_date'))}; refresh token: {'yes' if creds.get('refresh_token') else 'no'}")
-    expiry = creds.get("expiry_date") or 0
-    if expiry / 1000 < NOW.timestamp():
-        warn("access token expired; Kvota renews it using the installed Gemini CLI, or run gemini once")
-        return
-    status, body = curl(
-        "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
-        {"Authorization": f"Bearer {creds.get('access_token', '')}", "Content-Type": "application/json"},
-        method="POST",
-        body=json.dumps({"metadata": {"ideType": "IDE_UNSPECIFIED", "platform": "PLATFORM_UNSPECIFIED", "pluginType": "GEMINI"}}),
-    )
-    if status is None and body is None:
-        return
-    if status != 200:
-        bad(f"loadCodeAssist answered {status or 'nothing'}: {(body or '')[:160]}")
-        return
-    data = json.loads(body)
-    tier = (data.get("paidTier") or data.get("currentTier") or {}).get("name", "unknown")
-    project = data.get("cloudaicompanionProject")
-    if isinstance(project, dict):
-        project = project.get("id")
-    status, body = curl(
-        "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
-        {"Authorization": f"Bearer {creds.get('access_token', '')}", "Content-Type": "application/json"},
-        method="POST",
-        body=json.dumps({"project": project} if project else {}),
-    )
-    if status == 200:
-        buckets = json.loads(body).get("buckets") or []
-        summary = ", ".join(
-            f"{b.get('modelId')} {100 * float(b.get('remainingFraction', 0)):.0f}% left"
-            for b in buckets if b.get("modelId")
-        )
-        ok(f"quota endpoint ({tier}): {summary or 'no buckets'}")
-    else:
-        bad(f"retrieveUserQuota answered {status or 'nothing'}: {(body or '')[:160]}")
+        warn("no chat recordings yet: usage appears after your first Gemini reply")
+    info("Gemini CLI doesn't store its quota on disk, so Kvota shows token usage only")
 
 
 if __name__ == "__main__":
-    print(f"Kvota doctor — {NOW.astimezone():%Y-%m-%d %H:%M}{' (offline)' if OFFLINE else ''}")
+    print(f"Kvota doctor — {NOW.astimezone():%Y-%m-%d %H:%M}")
     for check in (check_claude, check_codex, check_gemini):
         try:
             check()

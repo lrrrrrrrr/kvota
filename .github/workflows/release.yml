@@ -96,7 +96,7 @@ jobs:
           shasum -a 256 "$zip" | tee "$zip.sha256"
           notes="Download **$zip**, unzip and move Kvota to Applications."
           if [ "$HAS_SIGNING" != "true" ]; then
-            notes="$notes This build is not notarized: the first time, right-click Kvota and choose Open."
+            notes="$notes This build is not notarized yet: the first time, open Kvota, then go to System Settings → Privacy \& Security and click Open Anyway."
           fi
           gh release create "${{ steps.version.outputs.tag }}" "$zip" "$zip.sha256" --title "Kvota ${{ steps.version.outputs.version }}" --notes "$notes" --generate-notes
 

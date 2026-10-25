@@ -159,18 +159,19 @@ struct LimitRow: View {
         let used = window.usedPercent(at: now)
         let left = window.remainingPercent(at: now)
         let color = Theme.fill(for: used, tint: tint)
+        let expired = window.isExpired(at: now)
         VStack(alignment: .leading, spacing: dense ? 2 : 3) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(window.label)
                     .font(.system(size: dense ? 10 : 11))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                if let resets = window.resetsAt, !window.isExpired(at: now) {
-                    Text("resets in \(Format.countdown(to: resets, from: now))")
+                if let resets = window.resetsAt {
+                    Text(expired ? "reset \(Format.ago(resets, now: now))" : "resets in \(Format.countdown(to: resets, from: now))")
                         .font(.system(size: dense ? 9 : 10))
                         .foregroundStyle(.tertiary)
                 }
-                Text(showRemaining ? "\(Format.percent(left)) left" : "\(Format.percent(used)) used")
+                Text(expired ? "new window" : showRemaining ? "\(Format.percent(left)) left" : "\(Format.percent(used)) used")
                     .font(.system(size: dense ? 10 : 11, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(used >= 75 ? color : Color.primary)

@@ -2,15 +2,9 @@ import AppKit
 import KvotaCore
 import SwiftUI
 
-/// Hooks the app target can set before launch.
-public enum KvotaRuntime {
-    /// Live limits client. The direct-download build installs one; the App Store build
-    /// leaves it empty and works from local files only.
-    nonisolated(unsafe) public static var liveProvider: LiveLimitsProvider?
-}
-
 /// Kvota's menu bar app. The floating widget and the settings window are AppKit
-/// windows managed by ``AppModel``.
+/// windows managed by ``AppModel``. Everything comes from files on this Mac: Kvota never
+/// reads another app's sign-in and never contacts a provider.
 public struct KvotaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -30,7 +24,7 @@ public struct KvotaApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let model = AppModel(liveProvider: KvotaRuntime.liveProvider)
+    let model = AppModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // When launched from `swift run` there is no Info.plist saying "no Dock icon".

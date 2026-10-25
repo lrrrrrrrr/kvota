@@ -142,10 +142,17 @@ struct ProviderCard: View {
                 Button("Grant Access…") { model.grantAccess(for: provider) }
                     .controlSize(.small)
             }
-        case .notInstalled where state.liveLimits == nil:
-            Text("No \(provider.toolName) data in \(model.homeDisplayPath(for: provider)) yet.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+        case .notInstalled:
+            VStack(alignment: .leading, spacing: 4) {
+                Text("No \(provider.toolName) data in \(model.homeDisplayPath(for: provider)) yet.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Button("Not using \(provider.displayName)? Hide it") {
+                    model.settings.enabledProviders.remove(provider)
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 10))
+            }
         default:
             if let limits = state.limits, !limits.windows.isEmpty {
                 VStack(alignment: .leading, spacing: 7) {
@@ -157,23 +164,16 @@ struct ProviderCard: View {
                     Text(detail)
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if limits.source == .statusLine, limits.windows.contains(where: { $0.isExpired(at: model.now) }) {
+                    Text("Send a message in the claude command to get a new reading.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
                 limitsHint
-            }
-            if let error = state.liveError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.orange)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                if state.usage?.hasActivity != true {
-                    Button("Not using \(provider.displayName)? Hide it") {
-                        model.settings.enabledProviders.remove(provider)
-                    }
-                    .buttonStyle(.link)
-                    .font(.system(size: 10))
-                }
             }
             usageLine
         }
@@ -181,55 +181,29 @@ struct ProviderCard: View {
 
     @ViewBuilder
     private var limitsHint: some View {
-        let liveSupported = model.supportsLiveLimits(for: provider)
-        let liveOn = liveSupported && model.settings.liveProviders.contains(provider)
-        let offerLive = liveSupported && !liveOn
-        let offerBridge = provider == .claude && !state.bridgeInstalled
         VStack(alignment: .leading, spacing: 6) {
-            // With an error below, that error says what to do; a second hint would contradict it.
-            if !(liveOn && state.liveError != nil) {
-                Text(hintText(liveSupported: liveSupported, liveOn: liveOn))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if offerLive || offerBridge {
-                HStack(spacing: 8) {
-                    if offerLive {
-                        Button("Show live limits") {
-                            model.settings.liveProviders.insert(provider)
-                        }
-                        .controlSize(.small)
-                    }
-                    if offerBridge {
-                        Button("Connect status line") { model.installBridge() }
-                            .controlSize(.small)
-                    }
-                }
+            Text(hintText)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if provider == .claude, !state.bridgeInstalled {
+                Button("Connect status line") { model.installBridge() }
+                    .controlSize(.small)
             }
         }
     }
 
-    private func hintText(liveSupported: Bool, liveOn: Bool) -> String {
-        if liveOn && state.liveError == nil {
-            return "Checking your \(provider.displayName) plan limits…"
-        }
+    private var hintText: String {
         switch provider {
         case .claude:
             if state.bridgeInstalled {
                 return ClaudeBridgeStatus.message(for: state.bridgeLastRun, now: model.now)
             }
-            return liveSupported
-                ? "Show your 5-hour and weekly limits live, or connect Claude Code's status line."
-                : "Connect Claude Code's status line to see your 5-hour and weekly limits."
+            return "Claude keeps your limits on its servers. Connect Claude Code's status line and Kvota shows them each time you use the claude command."
         case .codex:
-            return liveSupported && !liveOn
-                ? "Limits appear after your next Codex reply, or show them live now."
-                : "Limits appear after your next Codex reply."
+            return "Limits appear after your next Codex reply."
         case .gemini:
-            return liveSupported
-                ? "Gemini CLI doesn't keep its quota on your Mac. Show it live."
-                : "Gemini CLI doesn't keep its quota on your Mac."
+            return "Gemini CLI doesn't keep its quota on your Mac, so Kvota shows token usage only."
         }
     }
 
@@ -282,8 +256,6 @@ struct ProviderCard: View {
         switch source {
         case .sessionLog: "Read from \(provider.toolName)'s own session log on this Mac."
         case .statusLine: "Saved by Kvota's status line bridge after Claude Code's last reply."
-        case .estimate: "Worked out from Claude Code's logs on this Mac. Claude doesn't publish exact limits locally, so 100% means your heaviest 5-hour session so far."
-        case .live: "Fetched from \(provider.displayName)'s usage endpoint with your existing \(provider.toolName) login."
         }
     }
 }

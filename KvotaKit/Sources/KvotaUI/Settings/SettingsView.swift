@@ -126,23 +126,8 @@ private struct ProvidersSettings: View {
             ForEach(ProviderID.allCases) { provider in
                 ProviderSection(provider: provider)
             }
-            if model.supportsLiveLimits {
-                Section {
-                    Picker("Check live limits every", selection: liveInterval) {
-                        ForEach([2, 5, 10, 15, 30], id: \.self) { Text("\($0) minutes").tag($0) }
-                    }
-                } footer: {
-                    Text("Live limits use the login your CLI already has and talk only to that provider. They use endpoints the CLIs use internally, which can change without notice.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
         }
         .formStyle(.grouped)
-    }
-
-    private var liveInterval: Binding<Int> {
-        Binding(get: { model.settings.liveRefreshMinutes }, set: { model.settings.liveRefreshMinutes = $0 })
     }
 }
 
@@ -178,21 +163,6 @@ private struct ProviderSection: View {
 
             if provider == .claude {
                 bridgeRow(state)
-            }
-
-            if model.supportsLiveLimits(for: provider) {
-                Toggle(isOn: membership(\.liveProviders)) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Live limits")
-                        Text(liveExplanation)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                if let error = state.liveError, model.settings.liveProviders.contains(provider) {
-                    Text(error).font(.caption).foregroundStyle(.orange)
-                }
             }
         } header: {
             HStack(spacing: 6) {
@@ -244,19 +214,8 @@ private struct ProviderSection: View {
     private var limitsSourceText: String {
         switch provider {
         case .claude: "From Claude Code's status line"
-        case .codex: "From Codex's session logs" + (model.supportsLiveLimits(for: .codex) ? " or live" : "")
-        case .gemini: model.supportsLiveLimits(for: .gemini) ? "Live only (Gemini CLI keeps no local copy)" : "Not available in this build"
-        }
-    }
-
-    private var liveExplanation: String {
-        switch provider {
-        case .claude:
-            "Not available: Kvota doesn't use Claude sign-in tokens. Claude limits come from Claude Code's status line."
-        case .codex:
-            "Asks ChatGPT for your Codex limits with the Codex CLI login (~/.codex/auth.json or the Keychain). macOS may ask once to allow access."
-        case .gemini:
-            "Asks Google for your daily request quotas with the Gemini CLI login (~/.gemini/oauth_creds.json or the Keychain)."
+        case .codex: "From Codex's session logs"
+        case .gemini: "Not shown: Gemini CLI keeps no quota on your Mac"
         }
     }
 
@@ -355,8 +314,6 @@ private struct AboutSettings: View {
     }
 
     private var privacyText: String {
-        model.supportsLiveLimits
-            ? "Kvota reads usage from files the CLIs already keep on your Mac. Nothing leaves your Mac unless you turn on live limits, which talk only to the provider you enable them for."
-            : "Kvota reads usage from files the CLIs already keep on your Mac and never connects to the internet."
+        "Kvota reads usage from files the CLIs already keep on your Mac. It never reads your sign-ins and never connects to the internet."
     }
 }

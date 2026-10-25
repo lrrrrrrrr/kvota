@@ -78,7 +78,11 @@ public enum Format {
             return ([head] + tail).joined(separator: " ")
         }
         if name.hasPrefix("gemini-") {
-            return "Gemini " + GeminiLimits.displayName(forModel: name)
+            // "gemini-2.5-pro" → "Gemini 2.5 Pro"
+            let parts = name.dropFirst("gemini-".count).split(separator: "-").map { part -> String in
+                part.first?.isLetter == true ? part.prefix(1).uppercased() + part.dropFirst() : String(part)
+            }
+            return (["Gemini"] + parts).joined(separator: " ")
         }
         return raw
     }

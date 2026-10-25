@@ -18,33 +18,46 @@ public struct ProviderState: Equatable {
     public var usage: ProviderUsageSummary?
     /// Limits read from local files (Codex session logs, Claude status line bridge).
     public var localLimits: LimitsSnapshot?
-    public var liveLimits: LimitsSnapshot?
-    public var liveError: String?
-    /// A few words saying what to do about `liveError`.
-    public var liveErrorHint: String?
     public var access: DataAccess = .unknown
     public var bridgeInstalled = false
     /// The last time Claude Code ran the bridge, and what it shared.
     public var bridgeLastRun: StatusLineRun?
-    /// Claude's current 5-hour session reconstructed from the logs, shown while Claude Code
-    /// hasn't reported real limits.
-    public var estimatedLimits: LimitsSnapshot?
 
     public init(provider: ProviderID) {
         self.provider = provider
     }
 
-    /// The freshest limits reading from any source; an estimate only when nothing better exists.
-    public var limits: LimitsSnapshot? {
-        LimitsSnapshot.newest(localLimits, liveLimits) ?? estimatedLimits
-    }
+    /// Limits as the tool itself reported them (Kvota never guesses them).
+    public var limits: LimitsSnapshot? { localLimits }
 
     public func highestPercent(at now: Date) -> Double? {
         limits?.highestUsedPercent(at: now)
     }
+
+    /// A headline and a hint for when there are no limits to show.
+    public var noLimits: (headline: String, hint: String) {
+        switch access {
+        case .notInstalled: return ("Not installed", "no \(provider.homeFolderName) folder")
+        case .needsPermission: return ("No access", "click to allow")
+        case .unknown, .available: break
+        }
+        if let limits, !limits.windows.isEmpty {
+            // Every window in the last reading has reset since.
+            return ("Limits reset", provider == .claude ? "send a message in claude" : "updates with your next reply")
+        }
+        if let usage, usage.hasActivity {
+            let today = usage.today.tokens.total
+            let hint = provider == .gemini ? "tokens · Gemini keeps no quota locally" : "tokens · no limits in the logs"
+            return (today > 0 ? "\(Format.tokens(today)) today" : "None today", hint)
+        }
+        if provider == .claude, bridgeInstalled {
+            return ("No limits yet", ClaudeBridgeStatus.short(for: bridgeLastRun))
+        }
+        return ("No activity yet", "click for details")
+    }
 }
 
-/// App state and coordination: scanning, live refresh, the widget, alerts.
+/// App state and coordination: scanning, the widget, alerts.
 @MainActor
 @Observable
 public final class AppModel {
@@ -65,8 +78,6 @@ public final class AppModel {
     /// The floating widget shows every detail while expanded (toggled by clicking it).
     public var widgetExpanded = false
 
-    public let liveProvider: LiveLimitsProvider?
-
     let access = FolderAccess()
     private let store = UsageStore()
     private let widget = FloatingWidgetController()
@@ -78,34 +89,17 @@ public final class AppModel {
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     @ObservationIgnored private var rescanRequested = false
-    @ObservationIgnored private var lastLiveFetch: [ProviderID: Date] = [:]
-    @ObservationIgnored private var liveInFlight: Set<ProviderID> = []
     @ObservationIgnored private var started = false
     @ObservationIgnored private var firedAlerts: [String]
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
-    /// Preview models show fixed data and never scan or fetch.
+    /// Preview models show fixed data and never scan.
     @ObservationIgnored private var isPreview = false
 
-    public init(liveProvider: LiveLimitsProvider?) {
-        self.liveProvider = liveProvider
+    public init() {
         var loaded = AppSettings.load()
         if loaded.settingsVersion < AppSettings.currentVersion {
-            // Version 2: live limits are on by default wherever the build supports them,
-            // so subscription limits show up without any setup.
-            if let liveProvider {
-                loaded.liveProviders.formUnion(liveProvider.supportedProviders)
-            }
             loaded.settingsVersion = AppSettings.currentVersion
             loaded.save()
-        }
-        // Drop live-limit choices this build can't serve (Claude's live path was removed),
-        // so nothing waits on a request that never happens.
-        if let liveProvider {
-            let supported = loaded.liveProviders.intersection(liveProvider.supportedProviders)
-            if supported != loaded.liveProviders {
-                loaded.liveProviders = supported
-                loaded.save()
-            }
         }
         self.settings = loaded
         self.persistsSettings = true
@@ -114,8 +108,7 @@ public final class AppModel {
     }
 
     /// A model filled with fixed data, for previews and snapshot tests. Does nothing on its own.
-    init(preview settings: AppSettings, states: [ProviderState], now: Date, liveProvider: LiveLimitsProvider? = nil) {
-        self.liveProvider = liveProvider
+    init(preview settings: AppSettings, states: [ProviderState], now: Date) {
         self.settings = settings
         self.persistsSettings = false
         var all = Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { ($0, ProviderState(provider: $0)) })
@@ -138,15 +131,16 @@ public final class AppModel {
         states[provider] ?? ProviderState(provider: provider)
     }
 
+    /// Providers that get a spot in the floating widget: the tools installed on this Mac
+    /// (every visible provider, if none is).
+    public var widgetProviders: [ProviderID] {
+        let installed = visibleProviders.filter { state(for: $0).access != .notInstalled }
+        return installed.isEmpty ? visibleProviders : installed
+    }
+
     /// Highest usage across visible providers, for the menu bar.
     public func highestPercent() -> Double? {
         visibleProviders.compactMap { state(for: $0).highestPercent(at: now) }.max()
-    }
-
-    public var supportsLiveLimits: Bool { liveProvider != nil }
-
-    public func supportsLiveLimits(for provider: ProviderID) -> Bool {
-        liveProvider?.supportedProviders.contains(provider) ?? false
     }
 
     public var isSandboxed: Bool { access.isSandboxed }
@@ -166,15 +160,11 @@ public final class AppModel {
         rebuildWatcher()
         widget.attach(self)
         scheduleScan(after: 0)
-        refreshLive(minimumInterval: 0)
         startTicker()
 
         let center = NSWorkspace.shared.notificationCenter
         observers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in
-                self?.scheduleScan(after: 2)
-                self?.refreshLive(minimumInterval: 0)
-            }
+            Task { @MainActor in self?.scheduleScan(after: 2) }
         })
 
         if settings.notificationsEnabled { notifier.requestAuthorization() }
@@ -189,12 +179,10 @@ public final class AppModel {
         guard !isPreview else { return }
         now = Date()
         scheduleScan(after: 0)
-        refreshLive(minimumInterval: 60)
     }
 
     public func refreshNow() {
         scheduleScan(after: 0)
-        refreshLive(minimumInterval: 0)
     }
 
     private func startTicker() {
@@ -213,7 +201,6 @@ public final class AppModel {
                 } else {
                     await self.refreshSummaries()
                 }
-                self.refreshLive(minimumInterval: Double(self.settings.liveRefreshMinutes) * 60)
             }
         }
     }
@@ -225,17 +212,6 @@ public final class AppModel {
             refreshAccess()
             rebuildWatcher()
             scheduleScan(after: 0)
-        }
-        if settings.liveProviders != old.liveProviders {
-            for provider in old.liveProviders.subtracting(settings.liveProviders) {
-                update(provider) {
-                    $0.liveLimits = nil
-                    $0.liveError = nil
-                    $0.liveErrorHint = nil
-                }
-                lastLiveFetch[provider] = nil
-            }
-            refreshLive(minimumInterval: 0)
         }
         if settings.notificationsEnabled && !old.notificationsEnabled {
             notifier.requestAuthorization()
@@ -284,10 +260,6 @@ public final class AppModel {
             try StatusLineBridge(claudeHome: home).install()
             bridgeMessage = "Connected. Limits appear after your next message in Claude Code."
             update(.claude) { $0.bridgeInstalled = true }
-            // Show something right away instead of waiting for Claude Code.
-            if supportsLiveLimits(for: .claude), !settings.liveProviders.contains(.claude) {
-                settings.liveProviders.insert(.claude)
-            }
         } catch {
             bridgeMessage = error.localizedDescription
         }
@@ -350,7 +322,6 @@ public final class AppModel {
                 }
                 continue
             }
-            let summary = await store.summary(provider, now: now)
             var localLimits = await store.limitsFromLogs(provider)
             var bridgeInstalled = false
             var bridgeLastRun: StatusLineRun?
@@ -364,11 +335,10 @@ public final class AppModel {
                 bridgeInstalled = result.1
                 bridgeLastRun = result.2
             }
-            let estimate = provider == .claude ? Self.estimatedSession(from: summary, now: now) : nil
+            let summary = await store.summary(provider, now: now)
             update(provider) {
                 $0.usage = summary
                 $0.localLimits = localLimits
-                $0.estimatedLimits = estimate
                 if provider == .claude {
                     $0.bridgeInstalled = bridgeInstalled
                     $0.bridgeLastRun = bridgeLastRun
@@ -396,57 +366,6 @@ public final class AppModel {
         }
     }
 
-    /// Claude's session limit runs in 5-hour windows. Without Claude Code's own numbers,
-    /// show where the current window stands, scaled to the busiest window so far.
-    static func estimatedSession(from usage: ProviderUsageSummary, now: Date) -> LimitsSnapshot? {
-        guard let block = usage.currentBlock, block.end > now, usage.heaviestBlockTokens > 0 else { return nil }
-        let tokens = block.totals.tokens.total
-        let used = min(100, Double(tokens) / Double(usage.heaviestBlockTokens) * 100)
-        let window = LimitWindow(
-            id: "estimated-session",
-            label: "5-hour (estimate)",
-            usedPercent: used,
-            resetsAt: block.end,
-            duration: 5 * 3600
-        )
-        var detail = "\(Format.tokens(tokens)) tokens this session"
-        if block.totals.cost > 0 { detail += " (≈\(Format.cost(block.totals.cost)))" }
-        detail += ", compared with your heaviest session. Exact limits appear when Claude Code shares them."
-        return LimitsSnapshot(provider: .claude, windows: [window], capturedAt: now, source: .estimate, detail: detail)
-    }
-
-    // MARK: - Live limits
-
-    func refreshLive(minimumInterval: TimeInterval) {
-        guard !isPreview, let live = liveProvider else { return }
-        let now = Date()
-        for provider in visibleProviders
-        where settings.liveProviders.contains(provider) && live.supportedProviders.contains(provider) {
-            if liveInFlight.contains(provider) { continue }
-            if let last = lastLiveFetch[provider], now.timeIntervalSince(last) < minimumInterval { continue }
-            let home = access.url(for: provider) ?? access.defaultURL(for: provider)
-            liveInFlight.insert(provider)
-            lastLiveFetch[provider] = now
-            Task { [weak self] in
-                do {
-                    let snapshot = try await live.fetchLimits(for: provider, home: home)
-                    self?.update(provider) {
-                        $0.liveLimits = snapshot
-                        $0.liveError = nil
-                        $0.liveErrorHint = nil
-                    }
-                } catch {
-                    self?.update(provider) {
-                        $0.liveError = error.localizedDescription
-                        $0.liveErrorHint = (error as? KvotaError)?.short
-                    }
-                }
-                self?.liveInFlight.remove(provider)
-                self?.evaluateAlerts()
-            }
-        }
-    }
-
     // MARK: - Alerts
 
     private func evaluateAlerts() {
@@ -455,7 +374,7 @@ public final class AppModel {
         let thresholds = Array(Set([settings.warnThreshold, 95])).sorted()
         var changed = false
         for provider in visibleProviders {
-            guard let limits = state(for: provider).limits, limits.source != .estimate else { continue }
+            guard let limits = state(for: provider).limits else { continue }
             for window in limits.windows {
                 let used = window.usedPercent(at: now)
                 guard let threshold = thresholds.last(where: { used >= Double($0) }) else { continue }

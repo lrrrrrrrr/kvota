@@ -22,9 +22,8 @@
 
 ## What it shows
 
-- **5-hour and weekly limits** with countdowns to the reset — Codex from its own session
-  logs, Claude Code through an optional status line bridge, Gemini's daily per-model
-  quotas with live limits.
+- **5-hour and weekly limits** with countdowns to the reset: Codex from its own session
+  logs, Claude through Claude Code's status line.
 - **Tokens used** today, in the last 5 hours, 7 days and this month, per model, with an
   estimated API-equivalent cost.
 - **A floating widget** that stays above your windows on every Space, fades when you're
@@ -42,18 +41,18 @@
 
 ## How it gets the numbers
 
-No passwords, no API keys. Kvota reads what the CLIs already store on your Mac:
+No passwords, no API keys, no network. Kvota reads what the CLIs already store on your Mac:
 
 | | Usage | Limits |
 |---|---|---|
 | **Codex CLI** | `~/.codex/sessions/**/rollout-*.jsonl` | In the same files — every reply logs the 5-hour and weekly limits |
 | **Claude Code** | `~/.claude/projects/**/*.jsonl` | Claude Code passes them to status line commands; Kvota's bridge saves them (your status line keeps working) |
-| **Gemini CLI** | `~/.gemini/tmp/*/chats/*.jsonl` | Live only: Gemini CLI keeps no local copy |
+| **Gemini CLI** | `~/.gemini/tmp/*/chats/*.jsonl` | Not stored on your Mac, so not shown |
 
-The direct-download build also fetches **live Codex and Gemini limits** with the login
-those CLIs already have (switchable per provider). Claude limits come only from Claude
-Code's status line: Kvota never uses Claude sign-in tokens, which Anthropic doesn't allow
-third-party apps to do. Details, endpoints and troubleshooting:
+Claude limits are account-wide (chat, desktop, cloud sessions and Claude Code share
+them), and the status line reports exactly those numbers each time you use the `claude`
+command. Kvota never guesses a limit and never reads a sign-in: Anthropic doesn't allow
+third-party apps to use Claude sign-ins or session tokens. Details and troubleshooting:
 [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md).
 
 ## Light on resources
@@ -77,8 +76,11 @@ look, and keeps usage as 15-minute per-model totals rather than whole transcript
   make run       # swift run, straight from the package
   ```
 
+The release build isn't notarized yet: the first time, open Kvota, then allow it in
+System Settings → Privacy & Security → "Open Anyway".
+
 On first launch Kvota opens its settings. For Claude limits, click **Connect** next to
-"Status line bridge"; limits appear after Claude Code's next reply.
+"Status line bridge", then send a message with the `claude` command in Terminal.
 
 <p align="center">
   <picture>
@@ -93,8 +95,7 @@ On first launch Kvota opens its settings. For Claude limits, click **Connect** n
 |---|---|---|
 | Sandbox | No (hardened runtime) | Yes |
 | Folder access | Automatic | You pick `~/.claude`, `~/.codex`, `~/.gemini` once |
-| Network | Only for live Codex and Gemini limits | None |
-| Live limits | Optional | Not included |
+| Network | None | None |
 
 ## Project layout
 
@@ -102,7 +103,6 @@ On first launch Kvota opens its settings. For Claude limits, click **Connect** n
 KvotaKit/                 Swift package
   Sources/KvotaCore       Log parsers, incremental scanner, limits, pricing (macOS + Linux)
   Sources/KvotaUI         Menu bar, floating widget, settings, app model
-  Sources/KvotaLive       Live limits clients (direct build only)
   Tests/                  Parser/engine tests and UI snapshot rendering
 App/                      App entry point, Info.plist, entitlements, assets
 project.yml               XcodeGen spec for both app targets
@@ -114,12 +114,8 @@ The screenshots are rendered from the real views with sample data on a Mac runne
 composed by `scripts/compose-screenshots.py` (the `Screenshots` workflow keeps them
 up to date).
 
-## Related
-
-[CodexBar](https://github.com/steipete/CodexBar) is a mature menu bar app covering many
-providers. Kvota is deliberately small: three CLIs, a floating widget, local-first, and an
-App Store build.
-
 ## License
 
 MIT © 2026 Mykola Sleta
+
+Third-party software and data: [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md).

@@ -67,13 +67,6 @@ public struct UsageTotals: Sendable, Equatable {
 
     public var isEmpty: Bool { requests == 0 && tokens.isZero }
 
-    public mutating func merge(_ other: UsageTotals) {
-        tokens += other.tokens
-        cost += other.cost
-        requests += other.requests
-        unpricedTokens += other.unpricedTokens
-    }
-
     public mutating func add(_ counts: TokenCounts, requests: Int, cost: Double?) {
         tokens += counts
         self.requests += requests
@@ -120,11 +113,6 @@ public struct ProviderUsageSummary: Sendable, Equatable {
     public var models: [ModelUsage]
     public var lastActivity: Date?
     public var filesTracked: Int
-    /// The 5-hour session that is still running, worked out from the logs the way Claude's
-    /// session limit works: it starts at the hour of the first request and lasts five hours.
-    public var currentBlock: UsageBlock?
-    /// Tokens in the busiest 5-hour session in the retained history (for a relative scale).
-    public var heaviestBlockTokens: Int64 = 0
 
     public init(
         provider: ProviderID,
@@ -149,19 +137,4 @@ public struct ProviderUsageSummary: Sendable, Equatable {
     }
 
     public var hasActivity: Bool { lastActivity != nil }
-}
-
-/// A 5-hour usage session reconstructed from the logs.
-public struct UsageBlock: Sendable, Equatable {
-    public var start: Date
-    public var end: Date
-    public var totals: UsageTotals
-    public var lastActivity: Date
-
-    public init(start: Date, end: Date, totals: UsageTotals, lastActivity: Date) {
-        self.start = start
-        self.end = end
-        self.totals = totals
-        self.lastActivity = lastActivity
-    }
 }

@@ -6,17 +6,11 @@ public enum LimitSource: String, Sendable, Codable, Equatable {
     case sessionLog
     /// Captured from Claude Code's status line data by Kvota's bridge script.
     case statusLine
-    /// Fetched from the provider's usage endpoint with the CLI's existing login.
-    case live
-    /// Worked out from local logs, not reported by the provider.
-    case estimate
 
     public var displayName: String {
         switch self {
         case .sessionLog: "session log"
         case .statusLine: "status line"
-        case .live: "live"
-        case .estimate: "estimate from logs"
         }
     }
 }
@@ -79,42 +73,31 @@ public struct LimitsSnapshot: Sendable, Equatable, Codable {
         self.detail = detail
     }
 
-    /// The window closest to running out.
+    /// The window closest to running out. Windows that have reset since the reading are
+    /// skipped: what was used in them since is unknown until the next reading.
     public func mostConstrained(at now: Date) -> LimitWindow? {
-        windows.max { $0.usedPercent(at: now) < $1.usedPercent(at: now) }
+        windows
+            .filter { !$0.isExpired(at: now) }
+            .max { $0.usedPercent(at: now) < $1.usedPercent(at: now) }
     }
 
     public func highestUsedPercent(at now: Date) -> Double? {
         mostConstrained(at: now)?.usedPercent(at: now)
     }
 
-    /// Picks the newer of two readings. Live readings win ties.
+    /// Picks the newer of two readings.
     public static func newest(_ a: LimitsSnapshot?, _ b: LimitsSnapshot?) -> LimitsSnapshot? {
         guard let a else { return b }
         guard let b else { return a }
-        if abs(a.capturedAt.timeIntervalSince(b.capturedAt)) < 1 {
-            return a.source == .live ? a : b
-        }
-        return a.capturedAt > b.capturedAt ? a : b
+        return a.capturedAt >= b.capturedAt ? a : b
     }
-}
-
-/// Fetches limits straight from a provider. Only the direct-download build ships an
-/// implementation; the App Store build reads local files only.
-public protocol LiveLimitsProvider: AnyObject, Sendable {
-    var supportedProviders: [ProviderID] { get }
-    /// - Parameter home: the provider's home folder, for example `~/.codex`.
-    func fetchLimits(for provider: ProviderID, home: URL) async throws -> LimitsSnapshot
 }
 
 public struct KvotaError: LocalizedError, Equatable, Sendable {
     public let message: String
-    /// A few words for tight spaces, such as "Run codex to sign in again".
-    public let short: String?
 
-    public init(_ message: String, short: String? = nil) {
+    public init(_ message: String) {
         self.message = message
-        self.short = short
     }
 
     public var errorDescription: String? { message }

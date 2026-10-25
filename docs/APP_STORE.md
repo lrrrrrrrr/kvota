@@ -2,14 +2,15 @@
 
 The repository builds two apps from the same code:
 
-| Target | Distribution | Sandbox | Network | Live limits |
-|---|---|---|---|---|
-| `Kvota` | GitHub Releases, Homebrew | No (hardened runtime, notarized) | Only if you enable live limits | Yes |
-| `KvotaAppStore` | Mac App Store | Yes | None | No (not linked into the binary) |
+| Target | Distribution | Sandbox | Network |
+|---|---|---|---|
+| `Kvota` | GitHub Releases, Homebrew | No (hardened runtime) | None |
+| `KvotaAppStore` | Mac App Store | Yes | None |
 
-The App Store build reads local files only, through folders the user picks once in an
-open panel (security-scoped bookmarks). That keeps it clear of App Review questions
-about third-party services and tokens.
+Both read local files only. The App Store build reaches them through folders the user
+picks once in an open panel (security-scoped bookmarks). Neither touches a sign-in or a
+provider's servers, which keeps it clear of App Review questions about third-party
+services and tokens.
 
 ## One-time setup
 

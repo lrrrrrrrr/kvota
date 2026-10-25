@@ -71,10 +71,13 @@ jobs:
             du -sh "$app"
             codesign -d --entitlements - "$app" 2>/dev/null | grep -E 'app-sandbox|user-selected' || echo "(no sandbox entitlements)"
           done
-          # The App Store build must not contain the live-limits code.
-          if strings build/Build/Products/Release/KvotaAppStore.app/Contents/MacOS/KvotaAppStore | grep -q 'backend-api/wham'; then
-            echo "App Store build unexpectedly contains live-limit endpoints"; exit 1
-          fi
+          # Kvota reads local files only: neither build may contain provider endpoints.
+          for binary in build/Build/Products/Release/Kvota.app/Contents/MacOS/Kvota \
+                        build/Build/Products/Release/KvotaAppStore.app/Contents/MacOS/KvotaAppStore; do
+            if strings "$binary" | grep -E -q 'backend-api/wham|cloudcode-pa.googleapis|api/oauth/usage'; then
+              echo "$binary unexpectedly contains provider endpoints"; exit 1
+            fi
+          done
 
       - name: Annotate errors
         if: failure()
