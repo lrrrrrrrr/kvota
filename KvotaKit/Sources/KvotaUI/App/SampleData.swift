@@ -7,7 +7,18 @@ enum SampleData {
         var settings = AppSettings()
         settings.widgetStyle = style
         settings.hasLaunchedBefore = true
-        return AppModel(preview: settings, states: states(now: now), now: now)
+        settings.liveProviders = [.gemini]
+        settings.notificationsEnabled = true
+        return AppModel(preview: settings, states: states(now: now), now: now, liveProvider: SampleLiveProvider())
+    }
+
+    /// Stands in for the live-limits client so previews show the direct build's options.
+    final class SampleLiveProvider: LiveLimitsProvider, @unchecked Sendable {
+        let supportedProviders: [ProviderID] = ProviderID.allCases
+
+        func fetchLimits(for provider: ProviderID, home: URL) async throws -> LimitsSnapshot {
+            throw KvotaError("Sample data")
+        }
     }
 
     static func states(now: Date) -> [ProviderState] {

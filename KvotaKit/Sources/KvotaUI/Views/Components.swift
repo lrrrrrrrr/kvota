@@ -206,7 +206,8 @@ struct WidgetBackground: View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         ZStack {
             if snapshotMode {
-                shape.fill(Color(nsColor: .windowBackgroundColor))
+                // Translucent, so screenshots can be composed over a blurred wallpaper.
+                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.74))
             } else {
                 VisualEffectBackground().clipShape(shape)
             }
