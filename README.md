@@ -15,13 +15,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/widget-compact-dark.png" height="70" alt="Compact widget">
-  &nbsp;
-  <img src="docs/screenshots/widget-detailed-dark.png" height="250" alt="Detailed widget">
-  &nbsp;
-  <img src="docs/screenshots/menu-dark.png" height="420" alt="Menu bar window">
-</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/hero-dark.jpg">
+  <img src="docs/screenshots/hero-light.jpg" alt="Kvota's menu bar window and floating widget over an editor">
+</picture>
 
 ## What it shows
 
@@ -35,6 +32,13 @@
   anywhere. Compact (one ring per tool) or detailed (bars and reset times).
 - **The menu bar**: an icon with your highest usage, usage per tool, or just the icon.
 - **Alerts** when a limit passes your threshold (and again at 95%).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/widgets-dark.png">
+  <img src="docs/screenshots/widgets-light.png" alt="Compact and detailed widget styles">
+</picture>
+
+<p align="center"><sub>Compact and detailed widget. Screenshots use sample data.</sub></p>
 
 ## How it gets the numbers
 
@@ -74,6 +78,13 @@ look, and keeps usage as 15-minute per-model totals rather than whole transcript
 On first launch Kvota opens its settings. For Claude limits, click **Connect** next to
 "Status line bridge"; limits appear after Claude Code's next reply.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/settings-dark.png">
+    <img src="docs/screenshots/settings-light.png" width="640" alt="Kvota settings: providers">
+  </picture>
+</p>
+
 ## Two builds
 
 | | `Kvota` (direct) | `KvotaAppStore` |
@@ -96,8 +107,10 @@ project.yml               XcodeGen spec for both app targets
 scripts/                  Icon and price-table generators
 ```
 
-`make test` runs the tests; CI runs them on macOS and Linux, builds both apps and
-renders the screenshots above.
+`make test` runs the tests; CI runs them on macOS and Linux and builds both apps.
+The screenshots are rendered from the real views with sample data on a Mac runner and
+composed by `scripts/compose-screenshots.py` (the `Screenshots` workflow keeps them
+up to date).
 
 ## Related
 

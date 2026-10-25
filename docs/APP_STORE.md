@@ -80,7 +80,8 @@ about third-party services and tokens.
 
 ## Screenshots
 
-CI renders the menu and widget with sample data (`snapshots` artifact of the CI
-workflow). App Store screenshots must be 1280×800, 1440×900, 2560×1600 or 2880×1800;
-take them on a Mac running the app with real data, or compose the rendered snapshots
-onto a desktop background at one of those sizes.
+`docs/screenshots/hero-dark.jpg` and `hero-light.jpg` are 2880×1800, one of the sizes
+App Store Connect accepts for Mac apps, and contain only sample data on a generated
+wallpaper. The `Screenshots` workflow regenerates them from the current UI; run it from
+the Actions tab before a release. For more variants, add scenes to
+`scripts/compose-screenshots.py`.
