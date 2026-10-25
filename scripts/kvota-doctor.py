@@ -149,8 +149,9 @@ def check_claude():
     for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"):
         if os.environ.get(var):
             warn(f"{var} is set in this shell: Claude Code may use it instead of a Claude subscription")
-    if os.environ.get("ANTHROPIC_BASE_URL"):
-        warn(f"ANTHROPIC_BASE_URL points to {os.environ['ANTHROPIC_BASE_URL']}: not Anthropic's subscription service")
+    base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
+    if base_url and "api.anthropic.com" not in base_url:
+        warn(f"ANTHROPIC_BASE_URL points to {base_url}: Claude Code talks to another service, which has no Claude plan limits")
     if os.environ.get("CLAUDE_CONFIG_DIR"):
         info(f"CLAUDE_CONFIG_DIR = {os.environ['CLAUDE_CONFIG_DIR']}")
 
