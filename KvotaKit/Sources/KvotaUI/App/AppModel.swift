@@ -24,6 +24,8 @@ public struct ProviderState: Equatable {
     public var liveErrorHint: String?
     public var access: DataAccess = .unknown
     public var bridgeInstalled = false
+    /// The last time Claude Code ran the bridge, and what it shared.
+    public var bridgeLastRun: StatusLineRun?
 
     public init(provider: ProviderID) {
         self.provider = provider
@@ -348,16 +350,24 @@ public final class AppModel {
             let summary = await store.summary(provider, now: now)
             var localLimits = await store.limitsFromLogs(provider)
             var bridgeInstalled = false
+            var bridgeLastRun: StatusLineRun?
             if provider == .claude {
                 let bridge = StatusLineBridge(claudeHome: home)
-                let result = await Task.detached(priority: .utility) { (bridge.readSnapshot(), bridge.isInstalled()) }.value
+                let result = await Task.detached(priority: .utility) { () -> (LimitsSnapshot?, Bool, StatusLineRun?) in
+                    bridge.updateScriptIfNeeded()
+                    return (bridge.readSnapshot(), bridge.isInstalled(), bridge.readLastRun())
+                }.value
                 localLimits = result.0
                 bridgeInstalled = result.1
+                bridgeLastRun = result.2
             }
             update(provider) {
                 $0.usage = summary
                 $0.localLimits = localLimits
-                if provider == .claude { $0.bridgeInstalled = bridgeInstalled }
+                if provider == .claude {
+                    $0.bridgeInstalled = bridgeInstalled
+                    $0.bridgeLastRun = bridgeLastRun
+                }
             }
         }
         evaluateAlerts()

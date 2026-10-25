@@ -13,6 +13,8 @@ import Foundation
 public enum StatusLineBridgeScript {
     public static let fileName = "statusline-bridge.sh"
     public static let snapshotFileName = "rate_limits.json"
+    /// Written on every run: when it ran, whether Claude Code included limits, its version.
+    public static let lastRunFileName = "last_run.json"
     public static let previousCommandFileName = "statusline-command"
     /// Marker used to recognise the bridge in `settings.json`.
     public static let marker = "kvota/statusline-bridge.sh"
@@ -31,6 +33,11 @@ public enum StatusLineBridgeScript {
       tmp="$dir/.rate_limits.$$"
       if printf '{%s}\n' "$limits" > "$tmp"; then mv -f "$tmp" "$dir/rate_limits.json"; else rm -f "$tmp"; fi
     fi
+    version=$(printf '%s' "$flat" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+    has=false
+    if [ -n "$limits" ]; then has=true; fi
+    run="$dir/.last_run.$$"
+    if printf '{"at":%s,"rate_limits":%s,"version":"%s"}\n' "$(date +%s)" "$has" "$version" > "$run"; then mv -f "$run" "$dir/last_run.json"; else rm -f "$run"; fi
     if [ -s "$dir/statusline-command" ]; then
       printf '%s' "$input" | /bin/sh -c "$(cat "$dir/statusline-command")"
       exit $?
@@ -46,4 +53,28 @@ public enum StatusLineBridgeScript {
     if [ -n "$week" ]; then line="${line:+$line · }7d $week%"; fi
     printf '%s\n' "$line"
     """#
+}
+
+/// What the bridge saw the last time Claude Code ran the status line.
+public struct StatusLineRun: Equatable, Sendable {
+    public var at: Date
+    /// False when Claude Code ran the status line without any plan limits, which happens
+    /// when it isn't signed in with a Pro or Max plan.
+    public var hadRateLimits: Bool
+    public var claudeCodeVersion: String?
+
+    public init(at: Date, hadRateLimits: Bool, claudeCodeVersion: String?) {
+        self.at = at
+        self.hadRateLimits = hadRateLimits
+        self.claudeCodeVersion = claudeCodeVersion
+    }
+
+    public static func parse(_ data: Data) -> StatusLineRun? {
+        guard let root = JSON.object(data), let at = JSON.date(root["at"]) else { return nil }
+        return StatusLineRun(
+            at: at,
+            hadRateLimits: JSON.bool(root["rate_limits"]) ?? false,
+            claudeCodeVersion: JSON.string(root["version"])
+        )
+    }
 }

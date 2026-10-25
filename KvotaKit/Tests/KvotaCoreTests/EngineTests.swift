@@ -205,6 +205,16 @@ final class StatusLineBridgeTests: XCTestCase {
         let output = try run(script, input: input)
         XCTAssertEqual(output.trimmingCharacters(in: .whitespacesAndNewlines), "Opus 4.5 · 5h 23% · 7d 41%")
 
+        let firstRun = try XCTUnwrap(StatusLineRun.parse(Data(contentsOf: home.root.appendingPathComponent("kvota/last_run.json"))))
+        XCTAssertTrue(firstRun.hadRateLimits)
+        XCTAssertLessThan(abs(firstRun.at.timeIntervalSinceNow), 120)
+
+        // Without rate limits (not a Pro/Max login), the run is still recorded.
+        _ = try run(script, input: #"{"version":"2.1.300","model":{"display_name":"Sonnet"}}"#)
+        let bare = try XCTUnwrap(StatusLineRun.parse(Data(contentsOf: home.root.appendingPathComponent("kvota/last_run.json"))))
+        XCTAssertFalse(bare.hadRateLimits)
+        XCTAssertEqual(bare.claudeCodeVersion, "2.1.300")
+
         let saved = try Data(contentsOf: home.root.appendingPathComponent("kvota/rate_limits.json"))
         let snapshot = try XCTUnwrap(ClaudeLimits.parseStatusLine(saved, capturedAt: Date()))
         XCTAssertEqual(snapshot.windows.map(\.usedPercent), [23.5, 41.2])

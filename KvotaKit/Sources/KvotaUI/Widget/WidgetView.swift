@@ -193,6 +193,9 @@ private struct CompactItem: View {
         if state.liveError != nil {
             return state.liveErrorHint ?? "click for details"
         }
+        if state.provider == .claude, state.bridgeInstalled {
+            return ClaudeBridgeStatus.short(for: state.bridgeLastRun)
+        }
         return "click to set up"
     }
 

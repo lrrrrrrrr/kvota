@@ -13,6 +13,22 @@ struct StatusLineBridge: Sendable {
     var scriptURL: URL { folder.appendingPathComponent(StatusLineBridgeScript.fileName) }
     var snapshotURL: URL { folder.appendingPathComponent(StatusLineBridgeScript.snapshotFileName) }
     var previousCommandURL: URL { folder.appendingPathComponent(StatusLineBridgeScript.previousCommandFileName) }
+    var lastRunURL: URL { folder.appendingPathComponent(StatusLineBridgeScript.lastRunFileName) }
+
+    func readLastRun() -> StatusLineRun? {
+        guard let data = try? Data(contentsOf: lastRunURL) else { return nil }
+        return StatusLineRun.parse(data)
+    }
+
+    /// Keeps an installed bridge script in step with the one this version of Kvota ships.
+    func updateScriptIfNeeded() {
+        guard isInstalled() else { return }
+        let current = try? String(contentsOf: scriptURL, encoding: .utf8)
+        guard current != StatusLineBridgeScript.source else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? Data(StatusLineBridgeScript.source.utf8).write(to: scriptURL, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+    }
     var settingsURL: URL { claudeHome.appendingPathComponent("settings.json") }
     var backupURL: URL { claudeHome.appendingPathComponent("settings.json.kvota-backup") }
 

@@ -179,10 +179,13 @@ struct ProviderCard: View {
         let offerLive = liveSupported && !liveOn
         let offerBridge = provider == .claude && !state.bridgeInstalled
         VStack(alignment: .leading, spacing: 6) {
-            Text(hintText(liveSupported: liveSupported, liveOn: liveOn))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            // With an error below, that error says what to do; a second hint would contradict it.
+            if !(liveOn && state.liveError != nil) {
+                Text(hintText(liveSupported: liveSupported, liveOn: liveOn))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if offerLive || offerBridge {
                 HStack(spacing: 8) {
                     if offerLive {
@@ -207,7 +210,7 @@ struct ProviderCard: View {
         switch provider {
         case .claude:
             if state.bridgeInstalled {
-                return "Status line connected. Limits appear after your next message in the claude command-line tool (Pro or Max plans). The Claude desktop app doesn't run status lines."
+                return ClaudeBridgeStatus.message(for: state.bridgeLastRun, now: model.now)
             }
             return liveSupported
                 ? "Show your 5-hour and weekly limits live, or connect Claude Code's status line."
