@@ -245,7 +245,7 @@ private struct DetailedItem: View {
                     LimitRow(window: window, tint: provider.tint, now: now, dense: true, showRemaining: showRemaining)
                 }
             } else {
-                Text("\(state.noLimits.headline) · \(state.noLimits.hint)")
+                Text(state.noLimitsSentence)
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }

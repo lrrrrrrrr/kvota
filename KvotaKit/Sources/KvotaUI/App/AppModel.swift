@@ -47,13 +47,27 @@ public struct ProviderState: Equatable {
         }
         if let usage, usage.hasActivity {
             let today = usage.today.tokens.total
-            let hint = provider == .gemini ? "tokens · Gemini keeps no quota locally" : "tokens · no limits in the logs"
+            let hint = provider == .gemini ? "tokens · no quota on disk" : "tokens · no limits logged"
             return (today > 0 ? "\(Format.tokens(today)) today" : "None today", hint)
         }
         if provider == .claude, bridgeInstalled {
             return ("No limits yet", ClaudeBridgeStatus.short(for: bridgeLastRun))
         }
         return ("No activity yet", "click for details")
+    }
+
+    /// The same, as one sentence for roomier spots that already show today's tokens.
+    public var noLimitsSentence: String {
+        guard access == .available, limits == nil, usage?.hasActivity == true else {
+            return "\(noLimits.headline) · \(noLimits.hint)"
+        }
+        switch provider {
+        case .gemini: return "Usage only: Gemini CLI keeps no quota on your Mac."
+        case .codex: return "Usage only: no limits in Codex's logs yet."
+        case .claude: return bridgeInstalled
+            ? "No limits yet: \(ClaudeBridgeStatus.short(for: bridgeLastRun))."
+            : "Usage only: connect the status line for limits."
+        }
     }
 }
 
