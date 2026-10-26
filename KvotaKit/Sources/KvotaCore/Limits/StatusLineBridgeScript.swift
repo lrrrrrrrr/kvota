@@ -36,8 +36,11 @@ public enum StatusLineBridgeScript {
     version=$(printf '%s' "$flat" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
     has=false
     if [ -n "$limits" ]; then has=true; fi
+    # Before the session's first reply, context_window.current_usage is null and limits are absent.
+    replied=true
+    if printf '%s' "$flat" | grep -qE '"current_usage"[[:space:]]*:[[:space:]]*null'; then replied=false; fi
     run="$dir/.last_run.$$"
-    if printf '{"at":%s,"rate_limits":%s,"version":"%s"}\n' "$(date +%s)" "$has" "$version" > "$run"; then mv -f "$run" "$dir/last_run.json"; else rm -f "$run"; fi
+    if printf '{"at":%s,"rate_limits":%s,"replied":%s,"version":"%s"}\n' "$(date +%s)" "$has" "$replied" "$version" > "$run"; then mv -f "$run" "$dir/last_run.json"; else rm -f "$run"; fi
     if [ -s "$dir/statusline-command" ]; then
       printf '%s' "$input" | /bin/sh -c "$(cat "$dir/statusline-command")"
       exit $?
@@ -58,14 +61,17 @@ public enum StatusLineBridgeScript {
 /// What the bridge saw the last time Claude Code ran the status line.
 public struct StatusLineRun: Equatable, Sendable {
     public var at: Date
-    /// False when Claude Code ran the status line without any plan limits, which happens
-    /// when it isn't signed in with a Pro or Max plan.
+    /// False when Claude Code ran the status line without any plan limits: before the
+    /// session's first reply, or when it isn't signed in with a Pro or Max plan.
     public var hadRateLimits: Bool
+    /// False when the session hadn't had a reply yet (limits arrive with the first one).
+    public var replied: Bool
     public var claudeCodeVersion: String?
 
-    public init(at: Date, hadRateLimits: Bool, claudeCodeVersion: String?) {
+    public init(at: Date, hadRateLimits: Bool, replied: Bool = true, claudeCodeVersion: String?) {
         self.at = at
         self.hadRateLimits = hadRateLimits
+        self.replied = replied
         self.claudeCodeVersion = claudeCodeVersion
     }
 
@@ -74,6 +80,7 @@ public struct StatusLineRun: Equatable, Sendable {
         return StatusLineRun(
             at: at,
             hadRateLimits: JSON.bool(root["rate_limits"]) ?? false,
+            replied: JSON.bool(root["replied"]) ?? true,
             claudeCodeVersion: JSON.string(root["version"])
         )
     }

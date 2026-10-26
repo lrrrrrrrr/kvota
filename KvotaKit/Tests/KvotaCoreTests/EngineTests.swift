@@ -213,7 +213,14 @@ final class StatusLineBridgeTests: XCTestCase {
         _ = try run(script, input: #"{"version":"2.1.300","model":{"display_name":"Sonnet"}}"#)
         let bare = try XCTUnwrap(StatusLineRun.parse(Data(contentsOf: home.root.appendingPathComponent("kvota/last_run.json"))))
         XCTAssertFalse(bare.hadRateLimits)
+        XCTAssertTrue(bare.replied)
         XCTAssertEqual(bare.claudeCodeVersion, "2.1.300")
+
+        // At session start there has been no reply yet, so no limits either.
+        _ = try run(script, input: #"{"version":"2.1.310","context_window":{"current_usage":null}}"#)
+        let start = try XCTUnwrap(StatusLineRun.parse(Data(contentsOf: home.root.appendingPathComponent("kvota/last_run.json"))))
+        XCTAssertFalse(start.hadRateLimits)
+        XCTAssertFalse(start.replied)
 
         let saved = try Data(contentsOf: home.root.appendingPathComponent("kvota/rate_limits.json"))
         let snapshot = try XCTUnwrap(ClaudeLimits.parseStatusLine(saved, capturedAt: Date()))
