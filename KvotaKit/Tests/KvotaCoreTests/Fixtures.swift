@@ -45,8 +45,9 @@ enum Lines {
     }
 
     static func claude(id: String, request: String = "req_1", at date: Date, model: String = "claude-sonnet-4-5-20250929",
-                       input: Int = 100, output: Int = 50, cacheRead: Int = 1000, cacheWrite: Int = 200) -> String {
-        #"{"parentUuid":"x","type":"assistant","timestamp":"\#(iso(date))","requestId":"\#(request)","message":{"id":"\#(id)","model":"\#(model)","role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":\#(input),"output_tokens":\#(output),"cache_read_input_tokens":\#(cacheRead),"cache_creation_input_tokens":\#(cacheWrite)}}}"#
+                       input: Int = 100, output: Int = 50, cacheRead: Int = 1000, cacheWrite: Int = 200,
+                       entrypoint: String = "cli") -> String {
+        #"{"parentUuid":"x","type":"assistant","entrypoint":"\#(entrypoint)","timestamp":"\#(iso(date))","requestId":"\#(request)","message":{"id":"\#(id)","model":"\#(model)","role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":\#(input),"output_tokens":\#(output),"cache_read_input_tokens":\#(cacheRead),"cache_creation_input_tokens":\#(cacheWrite)}}}"#
     }
 
     static func claudeUser(at date: Date) -> String {

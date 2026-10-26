@@ -109,6 +109,12 @@ public final class UsageEngine {
             .filter { !$0.totals.isEmpty }
             .sorted { $0.totals.tokens.total > $1.totals.tokens.total }
         summary.lastActivity = ledger.files.values.compactMap(\.lastEvent).max()
+        let weekStart = now.addingTimeInterval(-7 * 86_400)
+        for record in ledger.files.values {
+            for (client, seen) in record.clients where seen >= weekStart {
+                summary.recentClients[client] = max(summary.recentClients[client] ?? .distantPast, seen)
+            }
+        }
         summary.filesTracked = ledger.files.count
         return summary
     }
@@ -230,6 +236,9 @@ public final class UsageEngine {
         record.buckets[slotKey, default: Bucket()].requests += 1
         if record.lastEvent.map({ event.timestamp > $0 }) ?? true {
             record.lastEvent = event.timestamp
+        }
+        if let client = event.client {
+            record.clients[client] = max(record.clients[client] ?? .distantPast, event.timestamp)
         }
     }
 
@@ -361,6 +370,8 @@ final class FileRecord {
     var recent: [RecentEntry] = []
     var parser = ParserState()
     var lastEvent: Date?
+    /// When each app that wrote to this file last did so.
+    var clients: [String: Date] = [:]
 }
 
 final class Ledger {
@@ -386,6 +397,7 @@ final class Ledger {
         record.recent.removeAll()
         record.parser = ParserState()
         record.lastEvent = nil
+        record.clients.removeAll()
         record.offset = 0
         aggregate = nil
     }

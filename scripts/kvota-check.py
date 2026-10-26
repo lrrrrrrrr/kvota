@@ -107,6 +107,9 @@ def find_claude():
 
 # ------------------------------------------------------------------ settings
 
+other_provider = [False]
+
+
 def check_settings():
     out("\n2. Claude Code settings (%s)" % CLAUDE)
     if os.environ.get("CLAUDE_CONFIG_DIR"):
@@ -140,7 +143,12 @@ def check_settings():
             if interesting:
                 info("%s sets environment variables (names only): %s" % (name, ", ".join(interesting)))
             if "ANTHROPIC_BASE_URL" in env or "ANTHROPIC_AUTH_TOKEN" in env or "ANTHROPIC_API_KEY" in env:
-                warn("Claude Code may use an API key or another provider, which has no plan limits")
+                other_provider[0] = True
+                base = str(env.get("ANTHROPIC_BASE_URL", ""))
+                host = re.sub(r"^https?://([^/]+).*$", r"\1", base) if base else ""
+                bad("%s points Claude Code at %s instead of your Claude plan: Claude Code then has no"
+                    % (name, host or "an API key"))
+                info("Claude plan limits to share, in the claude command (and possibly the desktop app)")
     for managed in ("/Library/Application Support/ClaudeCode/managed-settings.json",):
         data = read_json(managed)
         if data:
@@ -211,6 +219,7 @@ def check_logs():
     out("\n5. Where your Claude Code sessions on this Mac come from (last 14 days)")
     projects = CLAUDE / "projects"
     counts = {}
+    limit_keys = {}
     newest = None
     for path in projects.glob("*/*.jsonl"):
         try:
@@ -228,6 +237,8 @@ def check_logs():
             continue
         for value in re.findall(r'"entrypoint"\s*:\s*"([^"]+)"', tail):
             counts[value] = counts.get(value, 0) + 1
+        for key in re.findall(r'"(rate_limits?|rateLimit\w*|five_hour|seven_day|utilization|resets_?[aA]t)"', tail):
+            limit_keys[key] = limit_keys.get(key, 0) + 1
     if not counts:
         info("no recent session logs with an entrypoint field")
         return
@@ -238,11 +249,15 @@ def check_logs():
         warn("none of your recent Claude Code use is from the claude command, so the status line never ran")
     if newest:
         info("newest session log: " + ago(newest))
+    if limit_keys:
+        info("rate-limit fields found in the logs: %s" % ", ".join("%s x%d" % kv for kv in sorted(limit_keys.items())))
+    else:
+        info("the logs contain no rate-limit data (Claude Code doesn't write limits to its logs)")
 
 
 # ------------------------------------------------------------------ live test
 
-def live_test(claude, send_message):
+def live_test(claude, send_message, uses_other_provider):
     out("\n6. Live test: start claude once and watch the bridge")
     import pty  # macOS and Linux only
 
@@ -277,6 +292,12 @@ def live_test(claude, send_message):
     def ran():
         return last_run.exists() and last_run.stat().st_mtime > before
 
+    def send(data):
+        try:
+            os.write(fd, data)
+        except OSError:
+            pass  # claude has exited
+
     def screen_since(mark):
         text = re.sub(rb"\x1b\[[0-9;?<>=]*[A-Za-z~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[()][A-Z0-9]|\x1b[=>78]", b" ", buffer[mark:])
         return re.sub(r"\s+", " ", text.decode("utf-8", "replace"))
@@ -292,13 +313,16 @@ def live_test(claude, send_message):
             continue
         if re.search(r"I trust this folder|Do you trust", fresh, re.I):
             info("claude asked whether to trust the new empty test folder; choosing Yes")
-            # The dialog starts on "No, exit": move down to "Yes, I trust this folder" first.
-            os.write(fd, b"\x1b[B")
-            pump(0.5)
-            os.write(fd, b"\r")
+            picks = re.findall("[\u276f>]\\s*(?:\\d\\.\\s*)?(Yes, I trust|No, exit)", fresh)
+            if picks and picks[-1] == "No, exit":
+                # The menu cursor is on "No, exit": move it to "Yes, I trust this folder".
+                up = fresh.rfind("Yes, I trust") < fresh.rfind("No, exit")
+                send(b"\x1b[A" if up else b"\x1b[B")
+                pump(0.5)
+            send(b"\r")
         elif re.search(r"Enter to (confirm|continue)|Press Enter", fresh, re.I):
             info("closing a Claude Code notice: " + fresh.strip()[:80])
-            os.write(fd, b"\x1b")
+            send(b"\x1b")
         else:
             continue
         mark = len(buffer)
@@ -307,9 +331,12 @@ def live_test(claude, send_message):
     else:
         bad("Claude Code started but didn't run the bridge within 45 seconds")
         info("screen: " + screen()[-600:])
-    if send_message and ran():
+    if send_message and ran() and uses_other_provider:
+        info("not sending a test message: your settings send Claude Code to another provider,")
+        info("which has no Claude plan limits to share")
+    if send_message and ran() and not uses_other_provider:
         info("sending one short message so Claude Code shares your plan limits")
-        os.write(fd, b"Reply with just the word OK.\r")
+        send(b"Reply with just the word OK.\r")
         limits = KVOTA / "rate_limits.json"
         start = limits.stat().st_mtime if limits.exists() else 0
         sent = time.time()
@@ -332,9 +359,9 @@ def live_test(claude, send_message):
             bad("no limits after the reply (last run: %s)" % json.dumps(run))
             info("Claude Code only shares limits when signed in with a Claude Pro or Max plan")
             info("screen: " + screen()[-600:])
-    os.write(fd, b"\x03")
+    send(b"\x03")
     pump(1)
-    os.write(fd, b"\x03")
+    send(b"\x03")
     pump(2)
     try:
         os.kill(pid, 9)
@@ -351,8 +378,11 @@ def main():
     if script:
         simulate(script)
     check_logs()
-    if "--live" in sys.argv and claude:
-        live_test(claude, "--message" in sys.argv)
+    try:
+        if "--live" in sys.argv and claude:
+            live_test(claude, "--message" in sys.argv, other_provider[0])
+    except Exception as error:
+        bad("the live test stopped: %r" % error)
     out("\nNo secrets were printed.")
     try:
         REPORT.parent.mkdir(parents=True, exist_ok=True)

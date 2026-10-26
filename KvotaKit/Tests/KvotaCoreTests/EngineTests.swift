@@ -172,6 +172,18 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(engine.summary(.claude, now: now, calendar: utc).today.requests, 0)
     }
 
+    func testRecordsWhichAppWroteTheLogs() throws {
+        let home = try TempHome()
+        try home.write("projects/p/desktop.jsonl", Lines.claude(id: "a", at: now.addingTimeInterval(-3600), entrypoint: "claude-desktop") + "\n")
+        try home.write("projects/p/old.jsonl", Lines.claude(id: "b", at: now.addingTimeInterval(-10 * 86_400), entrypoint: "cli") + "\n")
+        let engine = UsageEngine()
+        engine.scan(.claude, home: home.root, now: now)
+        let summary = engine.summary(.claude, now: now, calendar: utc)
+        // Only the last seven days count: the old claude command session is left out.
+        XCTAssertEqual(Array(summary.recentClients.keys), ["claude-desktop"])
+        XCTAssertEqual(summary.recentClients["claude-desktop"], now.addingTimeInterval(-3600))
+    }
+
     func testMissingFoldersAreHarmless() throws {
         let home = try TempHome()
         let engine = UsageEngine()

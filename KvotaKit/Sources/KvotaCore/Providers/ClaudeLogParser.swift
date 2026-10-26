@@ -30,6 +30,9 @@ enum ClaudeLogParser: LogLineParser {
         if let messageID = JSON.string(message["id"]) {
             key = "claude:" + messageID + ":" + (JSON.string(object["requestId"]) ?? "")
         }
-        return .usage(UsageEvent(timestamp: timestamp, model: model, counts: counts, dedupeKey: key))
+        return .usage(UsageEvent(
+            timestamp: timestamp, model: model, counts: counts, dedupeKey: key,
+            client: JSON.string(object["entrypoint"])
+        ))
     }
 }

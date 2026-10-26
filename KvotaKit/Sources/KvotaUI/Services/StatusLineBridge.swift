@@ -40,6 +40,24 @@ struct StatusLineBridge: Sendable {
         return ClaudeLimits.parseStatusLine(data, capturedAt: captured)
     }
 
+    /// Where Claude Code's own settings send it instead of the Claude plan: the host of an
+    /// `ANTHROPIC_BASE_URL` that isn't Anthropic's, or "an API key". Reads only those
+    /// variable names and the URL's host, never a token.
+    func routedTo() -> String? {
+        for name in ["settings.json", "settings.local.json"] {
+            let url = claudeHome.appendingPathComponent(name)
+            guard let data = try? Data(contentsOf: url),
+                  let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let env = root["env"] as? [String: Any] else { continue }
+            if let base = env["ANTHROPIC_BASE_URL"] as? String, !base.isEmpty {
+                let host = URL(string: base)?.host ?? base
+                if !host.hasSuffix("anthropic.com") { return host }
+            }
+            if env["ANTHROPIC_API_KEY"] != nil || env["ANTHROPIC_AUTH_TOKEN"] != nil { return "an API key" }
+        }
+        return nil
+    }
+
     func isInstalled() -> Bool {
         currentCommand()?.contains(StatusLineBridgeScript.marker) ?? false
     }

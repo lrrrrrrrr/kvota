@@ -196,6 +196,10 @@ struct ProviderCard: View {
     private var hintText: String {
         switch provider {
         case .claude:
+            if let blocker = ClaudeBridgeStatus.blocker(routedTo: state.claudeRoutedTo, clients: state.usage?.recentClients ?? [:]),
+               state.bridgeLastRun?.hadRateLimits != true {
+                return blocker.message
+            }
             if state.bridgeInstalled {
                 return ClaudeBridgeStatus.message(for: state.bridgeLastRun, now: model.now)
             }

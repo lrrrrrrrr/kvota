@@ -7,6 +7,9 @@ struct UsageEvent: Equatable {
     var counts: TokenCounts
     /// Stable id for de-duplication across lines and files, when the log has one.
     var dedupeKey: String?
+    /// The app that wrote the line, when the log says (Claude Code's `entrypoint`, such as
+    /// "cli" for the claude command or "claude-desktop" for the Claude desktop app).
+    var client: String? = nil
 }
 
 /// Parser state that has to survive between incremental reads of the same file.

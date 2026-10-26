@@ -113,6 +113,9 @@ public struct ProviderUsageSummary: Sendable, Equatable {
     public var models: [ModelUsage]
     public var lastActivity: Date?
     public var filesTracked: Int
+    /// Apps that wrote usage in the last seven days, with when each last did (Claude Code
+    /// logs record this: "cli" is the claude command, "claude-desktop" the desktop app).
+    public var recentClients: [String: Date] = [:]
 
     public init(
         provider: ProviderID,

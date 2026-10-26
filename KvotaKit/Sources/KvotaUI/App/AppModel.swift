@@ -22,6 +22,8 @@ public struct ProviderState: Equatable {
     public var bridgeInstalled = false
     /// The last time Claude Code ran the bridge, and what it shared.
     public var bridgeLastRun: StatusLineRun?
+    /// Where Claude Code's settings send it instead of the Claude plan, if anywhere.
+    public var claudeRoutedTo: String?
 
     public init(provider: ProviderID) {
         self.provider = provider
@@ -45,6 +47,11 @@ public struct ProviderState: Equatable {
             // Every window in the last reading has reset since.
             return ("Limits reset", provider == .claude ? "send a message in claude" : "updates with your next reply")
         }
+        if provider == .claude,
+           let blocker = ClaudeBridgeStatus.blocker(routedTo: claudeRoutedTo, clients: usage?.recentClients ?? [:]) {
+            let today = usage?.today.tokens.total ?? 0
+            return (today > 0 ? "\(Format.tokens(today)) today" : "No limits here", blocker.short)
+        }
         if let usage, usage.hasActivity {
             let today = usage.today.tokens.total
             let hint = provider == .gemini ? "tokens · no quota on disk" : "tokens · no limits logged"
@@ -64,9 +71,13 @@ public struct ProviderState: Equatable {
         switch provider {
         case .gemini: return "Usage only: Gemini CLI keeps no quota on your Mac."
         case .codex: return "Usage only: no limits in Codex's logs yet."
-        case .claude: return bridgeInstalled
-            ? "No limits yet: \(ClaudeBridgeStatus.short(for: bridgeLastRun))."
-            : "Usage only: connect the status line for limits."
+        case .claude:
+            if let blocker = ClaudeBridgeStatus.blocker(routedTo: claudeRoutedTo, clients: usage?.recentClients ?? [:]) {
+                return "Usage only: \(blocker.short)."
+            }
+            return bridgeInstalled
+                ? "No limits yet: \(ClaudeBridgeStatus.short(for: bridgeLastRun))."
+                : "Usage only: connect the status line for limits."
         }
     }
 }
@@ -339,12 +350,14 @@ public final class AppModel {
             var localLimits = await store.limitsFromLogs(provider)
             var bridgeInstalled = false
             var bridgeLastRun: StatusLineRun?
+            var routedTo: String?
             if provider == .claude {
                 let bridge = StatusLineBridge(claudeHome: home)
-                let result = await Task.detached(priority: .utility) { () -> (LimitsSnapshot?, Bool, StatusLineRun?) in
+                let result = await Task.detached(priority: .utility) { () -> (LimitsSnapshot?, Bool, StatusLineRun?, String?) in
                     bridge.updateScriptIfNeeded()
-                    return (bridge.readSnapshot(), bridge.isInstalled(), bridge.readLastRun())
+                    return (bridge.readSnapshot(), bridge.isInstalled(), bridge.readLastRun(), bridge.routedTo())
                 }.value
+                routedTo = result.3
                 localLimits = result.0
                 bridgeInstalled = result.1
                 bridgeLastRun = result.2
@@ -356,6 +369,7 @@ public final class AppModel {
                 if provider == .claude {
                     $0.bridgeInstalled = bridgeInstalled
                     $0.bridgeLastRun = bridgeLastRun
+                    $0.claudeRoutedTo = routedTo
                 }
             }
         }
