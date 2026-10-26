@@ -34,10 +34,10 @@ enum ClaudeBridgeStatus {
 
     static func appName(_ client: String) -> String {
         switch client {
-        case "cli": "the claude command"
-        case "claude-desktop": "the Claude desktop app"
-        case "claude-vscode": "VS Code"
-        case "claude-jetbrains": "JetBrains IDEs"
+        case "cli": return "the claude command"
+        case "claude-desktop": return "the Claude desktop app"
+        case "claude-vscode": return "VS Code"
+        case "claude-jetbrains": return "JetBrains IDEs"
         default:
             if client.hasPrefix("sdk") { return "apps built with the Claude Agent SDK" }
             if client.hasPrefix("remote") { return "cloud sessions" }
